@@ -135,12 +135,13 @@ public enum FontRegistration {
             Bundle.main.executableURL?.deletingLastPathComponent(),            // next to binary (swift run)
         ]
         for root in searchRoots {
-            if let url = root?
-                .appendingPathComponent(bundleName + ".bundle")
-                .appendingPathComponent("Contents/Resources/\(fontName).ttf"),
-               FileManager.default.fileExists(atPath: url.path) {
-                return url
-            }
+            guard let bundleDir = root?.appendingPathComponent(bundleName + ".bundle") else { continue }
+            // Release .app: Contents/Resources/Font.ttf
+            let nested = bundleDir.appendingPathComponent("Contents/Resources/\(fontName).ttf")
+            if FileManager.default.fileExists(atPath: nested.path) { return nested }
+            // Debug (swift run): Font.ttf at bundle root
+            let flat = bundleDir.appendingPathComponent("\(fontName).ttf")
+            if FileManager.default.fileExists(atPath: flat.path) { return flat }
         }
 
         // 2. Main bundle directly (e.g. font copied into Resources/)

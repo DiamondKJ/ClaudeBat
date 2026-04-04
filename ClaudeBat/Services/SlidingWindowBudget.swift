@@ -66,6 +66,11 @@ public actor SlidingWindowBudget: BudgetTracking {
         return false
     }
 
+    /// Force-clear a server-imposed cooldown (self-healing when data is very stale).
+    public func clearServerCooldown() {
+        retryAfterDate = nil
+    }
+
     private func pruneExpired() {
         let cutoff = now().addingTimeInterval(-windowSeconds)
         timestamps.removeAll { $0 < cutoff }

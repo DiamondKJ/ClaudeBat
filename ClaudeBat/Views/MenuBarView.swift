@@ -13,7 +13,9 @@ public struct MenuBarLabel: View {
             if let usage = viewModel.usage {
                 Text("\(usage.fiveHour.remainingInt)")
                     .font(.system(size: 11, weight: .regular, design: .rounded))
-                    .foregroundStyle(CBColor.textPrimary)
+                    .monospacedDigit()
+                    .foregroundStyle(Color.primary)
+                    .fixedSize()
 
                 MenuBarBattery(percentage: usage.fiveHour.remaining)
             } else {

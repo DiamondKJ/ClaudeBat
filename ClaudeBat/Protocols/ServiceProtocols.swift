@@ -13,6 +13,7 @@ public protocol BudgetTracking: Actor {
     func recordRequest()
     func setRetryAfter(seconds: TimeInterval)
     func isServerCooldownActive() -> Bool
+    func clearServerCooldown()
     func nextAllowedAt() -> Date?
     func remainingBudget() -> Int
 }

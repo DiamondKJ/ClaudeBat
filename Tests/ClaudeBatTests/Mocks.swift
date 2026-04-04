@@ -20,6 +20,7 @@ actor MockBudget: BudgetTracking {
         _retryAfterCalled = true
     }
     func isServerCooldownActive() -> Bool { _serverCooldownActive }
+    func clearServerCooldown() { _serverCooldownActive = false }
     func nextAllowedAt() -> Date? { _nextAllowed }
     func remainingBudget() -> Int { _allowRequests ? 5 : 0 }
 

@@ -39,25 +39,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Status Item
 
     private func setupStatusItem() {
-        let hostingView = NSHostingView(rootView: MenuBarLabel(viewModel: viewModel))
-        let fittingSize = hostingView.fittingSize
-
-        statusItem = NSStatusBar.system.statusItem(withLength: fittingSize.width + 8)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         guard let button = statusItem.button else {
             NSApp.terminate(nil)
             return
         }
 
-        hostingView.frame = CGRect(
-            x: 4,
-            y: (button.bounds.height - fittingSize.height) / 2,
-            width: fittingSize.width,
-            height: fittingSize.height
-        )
+        let hostingView = NSHostingView(rootView: MenuBarLabel(viewModel: viewModel))
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
 
         button.subviews.forEach { $0.removeFromSuperview() }
         button.addSubview(hostingView)
+
+        NSLayoutConstraint.activate([
+            hostingView.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+            hostingView.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 4),
+            hostingView.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -4),
+        ])
 
         button.action = #selector(statusItemClicked(_:))
         button.target = self

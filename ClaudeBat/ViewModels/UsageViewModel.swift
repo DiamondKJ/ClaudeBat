@@ -31,6 +31,7 @@ public final class UsageViewModel {
     private var pollingTimer: Timer?
     private var isFetching = false
     private var consecutiveFailures = 0
+    private var selfHealAttempted = false
     private var sleepObserver: Any?
     private var screenWakeObserver: Any?
     private var machineWakeObserver: Any?
@@ -114,6 +115,19 @@ public final class UsageViewModel {
         isFetching = true
         defer { isFetching = false }
 
+        // Self-healing: if data is >10 min stale, clear stuck cooldown and retry once.
+        // If that retry also fails, show error state so the user knows something's wrong.
+        let dataAge = fetchedAt.map { Date().timeIntervalSince($0) } ?? .infinity
+        if dataAge > 600 && !selfHealAttempted {
+            selfHealAttempted = true
+            await budget.clearServerCooldown()
+            consecutiveFailures = 0
+            restartPolling()
+        } else if dataAge > 600 && selfHealAttempted {
+            errorMessage = "Unable to refresh — check your connection"
+            freshness = .stale
+        }
+
         let canGo = await budget.canRequest()
         if !canGo {
             // Reset boundary can bypass local budget, but never the server cooldown
@@ -152,6 +166,7 @@ public final class UsageViewModel {
             freshness = .fresh
             errorMessage = nil
             consecutiveFailures = 0
+            selfHealAttempted = false
             restartPolling()
             stopBatWink()
         } catch let error as UsageAPIError {
