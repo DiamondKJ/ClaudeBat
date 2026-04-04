@@ -24,7 +24,13 @@ macOS menu bar app. Shows your Claude session and weekly usage as retro 8-bit ba
 brew install diamondkj/tap/claudebat
 ```
 
-Or grab the `.dmg` from [Releases](https://github.com/DiamondKJ/ClaudeBat/releases). Needs macOS 14+ and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) logged in.
+Or grab the `.dmg` from [Releases](https://github.com/DiamondKJ/ClaudeBat/releases), drag to Applications, then run once:
+
+```
+xattr -cr /Applications/ClaudeBat.app
+```
+
+Needs macOS 14+ and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) logged in.
 
 ## What You Get
 
