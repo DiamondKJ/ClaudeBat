@@ -28,9 +28,11 @@ Package.resolved
 # Secrets
 *.env
 
-# Local docs (research, design, sketches)
-.claude/docs/
-.claude/design-reference.md
+# Internal docs (not for public repo)
+.claude/
+CLAUDE.md
+AGENTS.md
+plan.md
 kj-designs/
 bat-pixel-art.js
 scripts/rate-limit-experiment.sh
