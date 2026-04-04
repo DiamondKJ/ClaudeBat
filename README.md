@@ -16,6 +16,10 @@
 
 ---
 
+<p align="center">
+  <img src="assets/popover.png" alt="ClaudeBat popover" width="360">
+</p>
+
 macOS menu bar app. Shows your Claude session and weekly usage as retro 8-bit battery bars.
 
 ## Install
