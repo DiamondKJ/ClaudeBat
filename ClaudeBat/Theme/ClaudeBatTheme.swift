@@ -107,13 +107,8 @@ enum CBRadius {
 
 public enum FontRegistration {
     public static func registerFonts() {
-        // Try SPM resource bundle first, then main bundle
-        let fontURL: URL? =
-            Bundle.module.url(forResource: "PressStart2P-Regular", withExtension: "ttf")
-            ?? Bundle.main.url(forResource: "PressStart2P-Regular", withExtension: "ttf")
-
-        guard let fontURL else {
-            print("ClaudeBat: PressStart2P-Regular.ttf not found in bundle")
+        guard let fontURL = findFontURL() else {
+            print("ClaudeBat: PressStart2P-Regular.ttf not found in any bundle")
             return
         }
         var error: Unmanaged<CFError>?
@@ -125,5 +120,34 @@ public enum FontRegistration {
                 print("ClaudeBat: Failed to register font: \(cfError.debugDescription)")
             }
         }
+    }
+
+    /// Find the font without relying on Bundle.module (which fatalErrors if the
+    /// SPM resource bundle isn't found — common in redistributed .app bundles).
+    private static func findFontURL() -> URL? {
+        let fontName = "PressStart2P-Regular"
+        let bundleName = "ClaudeBat_ClaudeBatCore"
+
+        // 1. Search for the SPM resource bundle in likely locations
+        let searchRoots: [URL?] = [
+            Bundle.main.resourceURL,                                          // .app/Contents/Resources/
+            Bundle.main.bundleURL,                                            // .app/
+            Bundle.main.executableURL?.deletingLastPathComponent(),            // next to binary (swift run)
+        ]
+        for root in searchRoots {
+            if let url = root?
+                .appendingPathComponent(bundleName + ".bundle")
+                .appendingPathComponent("Contents/Resources/\(fontName).ttf"),
+               FileManager.default.fileExists(atPath: url.path) {
+                return url
+            }
+        }
+
+        // 2. Main bundle directly (e.g. font copied into Resources/)
+        if let url = Bundle.main.url(forResource: fontName, withExtension: "ttf") {
+            return url
+        }
+
+        return nil
     }
 }

@@ -139,15 +139,15 @@ APP_SIZE=$(du -sh "$APP_BUNDLE" | cut -f1)
 echo "  $APP_NAME.app: $APP_SIZE"
 echo "  Location: $APP_BUNDLE"
 
-# ── Step 5: Optional code signing ──
+# ── Step 5: Code signing ──
 if [ -n "${CODESIGN_IDENTITY:-}" ]; then
     echo "→ Signing with: $CODESIGN_IDENTITY"
-    codesign --force --deep --sign "$CODESIGN_IDENTITY" \
-        --entitlements "$PROJECT_DIR/ClaudeBat/ClaudeBat.entitlements" \
-        "$APP_BUNDLE"
-    echo "  Signed."
+    codesign --force --deep --sign "$CODESIGN_IDENTITY" "$APP_BUNDLE"
+    echo "  Signed with identity."
 else
-    echo "  Skipping code signing (set CODESIGN_IDENTITY to enable)"
+    echo "→ Ad-hoc signing .app bundle..."
+    codesign --force --deep --sign - "$APP_BUNDLE"
+    echo "  Ad-hoc signed."
 fi
 
 # ── Step 6: Optional DMG ──
