@@ -1,0 +1,37 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+xcuserdata/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Swift Package Manager
+.build/
+Packages/
+Package.resolved
+
+# IDE
+*.swp
+*.swo
+*~
+
+# Secrets
+*.env
+
+# Local docs (research, design, sketches)
+.claude/docs/
+.claude/design-reference.md
+kj-designs/
+bat-pixel-art.js
+scripts/rate-limit-experiment.sh
+scripts/rate-limit-results.log

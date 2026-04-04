@@ -1,0 +1,115 @@
+name: Release
+
+# Trigger on version tags: v1.0.0, v1.2.3, etc.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set version from tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+
+      - name: Build universal binary
+        run: swift build -c release --arch arm64 --arch x86_64
+
+      - name: Assemble .app bundle
+        run: |
+          BINARY="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/ClaudeBat"
+          APP="build/ClaudeBat.app"
+          CONTENTS="$APP/Contents"
+
+          mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
+
+          # Binary
+          cp "$BINARY" "$CONTENTS/MacOS/ClaudeBat"
+          chmod +x "$CONTENTS/MacOS/ClaudeBat"
+
+          # Info.plist
+          cat > "$CONTENTS/Info.plist" << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleDevelopmentRegion</key><string>en</string>
+            <key>CFBundleExecutable</key><string>ClaudeBat</string>
+            <key>CFBundleIdentifier</key><string>com.diamondkj.claudebat</string>
+            <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+            <key>CFBundleName</key><string>ClaudeBat</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>$VERSION</string>
+            <key>CFBundleVersion</key><string>1</string>
+            <key>LSMinimumSystemVersion</key><string>14.0</string>
+            <key>LSUIElement</key><true/>
+            <key>CFBundleIconFile</key><string>AppIcon</string>
+            <key>ATSApplicationFontsPath</key><string>.</string>
+          </dict>
+          </plist>
+          PLIST
+
+          # Icon
+          ICONSET="build/AppIcon.iconset"
+          mkdir -p "$ICONSET"
+          cp ClaudeBat/Assets.xcassets/AppIcon.appiconset/icon_16x16.png     "$ICONSET/icon_16x16.png"
+          cp ClaudeBat/Assets.xcassets/AppIcon.appiconset/icon_32x32.png     "$ICONSET/icon_16x16@2x.png"
+          cp ClaudeBat/Assets.xcassets/AppIcon.appiconset/icon_32x32.png     "$ICONSET/icon_32x32.png"
+          cp ClaudeBat/Assets.xcassets/AppIcon.appiconset/icon_64x64.png     "$ICONSET/icon_32x32@2x.png"
+          cp ClaudeBat/Assets.xcassets/AppIcon.appiconset/icon_128x128.png   "$ICONSET/icon_128x128.png"
+          cp ClaudeBat/Assets.xcassets/AppIcon.appiconset/icon_256x256.png   "$ICONSET/icon_128x128@2x.png"
+          cp ClaudeBat/Assets.xcassets/AppIcon.appiconset/icon_256x256.png   "$ICONSET/icon_256x256.png"
+          cp ClaudeBat/Assets.xcassets/AppIcon.appiconset/icon_512x512.png   "$ICONSET/icon_256x256@2x.png"
+          cp ClaudeBat/Assets.xcassets/AppIcon.appiconset/icon_512x512.png   "$ICONSET/icon_512x512.png"
+          cp ClaudeBat/Assets.xcassets/AppIcon.appiconset/icon_1024x1024.png "$ICONSET/icon_512x512@2x.png"
+          iconutil -c icns "$ICONSET" -o "$CONTENTS/Resources/AppIcon.icns"
+
+          # SPM resource bundle (contains the font)
+          BIN_DIR="$(dirname "$BINARY")"
+          cp -R "$BIN_DIR/ClaudeBat_ClaudeBatCore.bundle" "$CONTENTS/Resources/"
+
+          # Verify
+          file "$CONTENTS/MacOS/ClaudeBat"
+
+      - name: Create DMG
+        run: |
+          DMG_STAGING="build/dmg-staging"
+          mkdir -p "$DMG_STAGING"
+          cp -R build/ClaudeBat.app "$DMG_STAGING/"
+          ln -s /Applications "$DMG_STAGING/Applications"
+
+          hdiutil create -volname "ClaudeBat" \
+            -srcfolder "$DMG_STAGING" \
+            -ov -format UDZO \
+            "build/ClaudeBat-${VERSION}.dmg"
+
+          shasum -a 256 "build/ClaudeBat-${VERSION}.dmg"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ClaudeBat v${{ env.VERSION }}
+          body: |
+            ## ClaudeBat v${{ env.VERSION }}
+
+            Your Claude usage. One glance away.
+
+            ### Install
+
+            **Download:** Grab `ClaudeBat-${{ env.VERSION }}.dmg` below, open it, drag to Applications.
+
+            **Homebrew:**
+            ```
+            brew install diamondkj/tap/claudebat
+            ```
+
+            Requires macOS 14+ and Claude Code logged in.
+          files: build/ClaudeBat-${{ env.VERSION }}.dmg
+          draft: false
+          prerelease: false
