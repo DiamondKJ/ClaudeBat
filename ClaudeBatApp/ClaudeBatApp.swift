@@ -44,7 +44,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: fittingSize.width + 8)
 
-        guard let button = statusItem.button else { return }
+        guard let button = statusItem.button else {
+            NSApp.terminate(nil)
+            return
+        }
 
         hostingView.frame = CGRect(
             x: 4,
