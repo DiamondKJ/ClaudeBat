@@ -140,14 +140,19 @@ echo "  $APP_NAME.app: $APP_SIZE"
 echo "  Location: $APP_BUNDLE"
 
 # ── Step 5: Code signing ──
+# Ad-hoc signing seals bundle resources, making quarantine xattr irremovable.
+# Only sign with a real Developer ID identity. Without one, leave unsigned
+# so users/Homebrew can clear quarantine with xattr -cr.
 if [ -n "${CODESIGN_IDENTITY:-}" ]; then
     echo "→ Signing with: $CODESIGN_IDENTITY"
-    codesign --force --deep --sign "$CODESIGN_IDENTITY" "$APP_BUNDLE"
+    xattr -cr "$APP_BUNDLE"
+    codesign --force --options runtime --sign "$CODESIGN_IDENTITY" \
+        "$APP_BUNDLE/Contents/Resources/ClaudeBat_ClaudeBatCore.bundle"
+    codesign --force --options runtime --sign "$CODESIGN_IDENTITY" \
+        "$APP_BUNDLE"
     echo "  Signed with identity."
 else
-    echo "→ Ad-hoc signing .app bundle..."
-    codesign --force --deep --sign - "$APP_BUNDLE"
-    echo "  Ad-hoc signed."
+    echo "  Unsigned (no CODESIGN_IDENTITY). Users may need: xattr -cr ClaudeBat.app"
 fi
 
 # ── Step 6: Optional DMG ──

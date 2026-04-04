@@ -74,12 +74,8 @@ jobs:
           BIN_DIR="$(dirname "$BINARY")"
           cp -R "$BIN_DIR/ClaudeBat_ClaudeBatCore.bundle" "$CONTENTS/Resources/"
 
-          # Ad-hoc sign the .app bundle
-          codesign --force --deep --sign - build/ClaudeBat.app
-
           # Verify
           file "$CONTENTS/MacOS/ClaudeBat"
-          codesign -dvv build/ClaudeBat.app
 
       - name: Create DMG
         run: |
