@@ -9,7 +9,6 @@ let package = Package(
             name: "ClaudeBatCore",
             path: "ClaudeBat",
             exclude: [
-                "App/ClaudeBatApp.swift",
                 "Info.plist",
                 "ClaudeBat.entitlements",
                 "Assets.xcassets",
