@@ -24,14 +24,15 @@ macOS menu bar app. Shows your Claude session and weekly usage as retro 8-bit ba
 
 ## Install
 
-**Homebrew:**
 ```
 brew install diamondkj/tap/claudebat
 ```
 
-**Or** grab the `.dmg` from [Releases](https://github.com/DiamondKJ/ClaudeBat/releases) and drag to Applications.
+That's it. ClaudeBat automatically finds your Claude Code OAuth token from Keychain — no config, no API keys, no setup. Just install and it appears in your menu bar.
 
-On first launch, macOS will block it (unsigned app). Go to **System Settings > Privacy & Security** and click **Open Anyway**. One-time only.
+Alternatively, grab the `.dmg` from [Releases](https://github.com/DiamondKJ/ClaudeBat/releases) and drag to Applications.
+
+> On first launch, macOS will block it (unsigned app). Go to **System Settings > Privacy & Security** and click **Open Anyway**. One-time only.
 
 Requires macOS 14+ and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) logged in.
 
@@ -44,9 +45,9 @@ Requires macOS 14+ and [Claude Code](https://docs.anthropic.com/en/docs/claude-c
 
 ## How It Works
 
-Reads your OAuth token from Keychain via `/usr/bin/security` subprocess. Zero prompts.
+Reads your Claude Code OAuth token straight from macOS Keychain — zero prompts, zero config. If you're logged into Claude Code, ClaudeBat just works.
 
-Polls `GET /api/oauth/usage` on a 5-request/300s sliding window budget. Caches in UserDefaults with 24h TTL. Bypasses local budget on sleep/wake and 5-hour reset boundaries. Always respects server 429.
+Polls the usage API on a sliding window budget, caches locally, and auto-refreshes on sleep/wake and session resets.
 
 ## Uninstall
 
