@@ -15,7 +15,7 @@ BUILD_DIR="$PROJECT_DIR/build"
 APP_NAME="ClaudeBat"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 BUNDLE_ID="com.diamondkj.claudebat"
-VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "1.0.0")
+VERSION="${VERSION_OVERRIDE:-$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "1.0.0")}"
 
 echo "=== Building $APP_NAME v$VERSION ==="
 
@@ -181,6 +181,48 @@ if [[ "${1:-}" == "--dmg" ]]; then
     # Print SHA256 for Homebrew Cask
     DMG_SHA=$(shasum -a 256 "$DMG_PATH" | cut -d' ' -f1)
     echo "  SHA256: $DMG_SHA"
+    CASK_SNIPPET="$BUILD_DIR/CASK-SNIPPET.txt"
+    cat > "$CASK_SNIPPET" << EOF
+version "$VERSION"
+sha256 "$DMG_SHA"
+EOF
+    echo "  Cask snippet: $CASK_SNIPPET"
+fi
+
+if [ -z "${CODESIGN_IDENTITY:-}" ]; then
+    INSTALL_NOTES="$BUILD_DIR/INSTALL-UNSIGNED.txt"
+    cat > "$INSTALL_NOTES" << EOF
+ClaudeBat unsigned install notes
+===============================
+
+This build is unsigned. That means friends must remove quarantine once after
+copying the app into /Applications.
+
+Direct download install:
+  1. Open the DMG
+  2. Drag ClaudeBat.app to /Applications
+  3. Run:
+
+     xattr -cr /Applications/ClaudeBat.app
+     open /Applications/ClaudeBat.app
+
+Homebrew install:
+  brew install diamondkj/tap/claudebat
+
+If Homebrew install still will not launch, run:
+  xattr -cr /Applications/ClaudeBat.app
+  open /Applications/ClaudeBat.app
+
+If Finder still blocks the first launch, right-click ClaudeBat.app and choose Open once.
+EOF
+
+    echo ""
+    echo "Unsigned install notes written to:"
+    echo "  $INSTALL_NOTES"
+    echo ""
+    echo "Run these commands after copying the app to /Applications:"
+    echo "  xattr -cr /Applications/ClaudeBat.app"
+    echo "  open /Applications/ClaudeBat.app"
 fi
 
 echo ""

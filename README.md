@@ -24,13 +24,50 @@ macOS menu bar app. Shows your Claude session and weekly usage as retro 8-bit ba
 brew install diamondkj/tap/claudebat
 ```
 
-Or grab the `.dmg` from [Releases](https://github.com/DiamondKJ/ClaudeBat/releases), drag to Applications, then run once:
+Without an Apple Developer ID, macOS will not trust a downloaded build automatically.
+That means there is no true zero-step install path for friends. The minimum working path is one
+extra command after install:
+
+If you installed with Homebrew and it still will not open:
+
+```
+xattr -cr /Applications/ClaudeBat.app
+```
+
+If you grabbed the `.dmg` from [Releases](https://github.com/DiamondKJ/ClaudeBat/releases), drag to Applications, then run:
 
 ```
 xattr -cr /Applications/ClaudeBat.app
 ```
 
 Needs macOS 14+ and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) logged in.
+
+If Finder still blocks the first launch, right-click `ClaudeBat.app` and choose `Open` once.
+
+## Release Build
+
+Build the app and DMG:
+
+```
+./scripts/build-app.sh --dmg
+```
+
+Share the generated DMG from `build/`.
+
+For direct installs, run:
+
+```bash
+# 1. Drag ClaudeBat.app to /Applications
+# 2. Strip quarantine once
+xattr -cr /Applications/ClaudeBat.app
+
+# 3. Launch it
+open /Applications/ClaudeBat.app
+```
+
+If you want actual "download and it just works" on stock macOS, you need a Developer ID-signed
+and notarized build. Apple requires that for trusted outside-App-Store distribution, and
+Homebrew's own cask docs reject apps that fail with Gatekeeper on supported Macs.
 
 ## What You Get
 
