@@ -1,6 +1,9 @@
 import SwiftUI
 
 struct LoadingRetroView: View {
+    let title: String
+    let message: String?
+
     @State private var filledSegments: Int = 0
     @State private var batExpression: BatExpression = .default
     @State private var expressionIndex = 0
@@ -8,13 +11,28 @@ struct LoadingRetroView: View {
     private let totalSegments = 20
     private let expressions: [BatExpression] = [.default, .winking, .cheeky, .sleeping]
 
+    init(title: String = "LOADING", message: String? = nil) {
+        self.title = title
+        self.message = message
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
 
-            Text("LOADING")
+            Text(title)
                 .font(CBFont.heading)
                 .foregroundStyle(CBColor.textPrimary)
+
+            if let message {
+                Spacer().frame(height: 12)
+
+                Text(message)
+                    .font(CBFont.smallLabel)
+                    .foregroundStyle(CBColor.textMuted)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 20)
+            }
 
             Spacer().frame(height: 24)
 

@@ -22,3 +22,8 @@ public protocol UsageCaching {
     func read() -> Timestamped<UsageResponse>?
     func write(_ response: UsageResponse)
 }
+
+public protocol AppMonitoring: Actor {
+    func record(event: MonitorEvent, status: MonitorStatus)
+    func latestStatus() -> MonitorStatus?
+}

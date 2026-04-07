@@ -17,30 +17,45 @@ public struct UsagePopoverView: View {
 
     @ViewBuilder
     private var liveContent: some View {
-        if viewModel.hasError {
+        switch viewModel.popoverScreen {
+        case .error:
             popupChrome {
                 ErrorView(message: viewModel.errorMessage ?? "Unknown error")
             }
-        } else if viewModel.usage == nil && viewModel.hasNoAuth {
+        case .reconnectClaude:
             popupChrome {
-                NoAuthView()
+                NoAuthView(mode: viewModel.authPrompt == .reconnect ? .reconnect : .setup)
             }
-        } else if let usage = viewModel.usage {
-            if viewModel.isFullyMaxed {
-                popupChrome {
-                    GameOverView(usage: usage)
-                }
-            } else {
+        case .offline:
+            popupChrome {
+                ErrorView(titleOverride: "No Internet", message: viewModel.offlineErrorMessage)
+            }
+        case .recovering:
+            LoadingRetroView(title: "SYNCING", message: viewModel.recoveryMessage)
+                .frame(width: CBSpacing.popupWidth, height: CBSpacing.popupHeight)
+                .background(CBColor.base)
+                .clipShape(RoundedRectangle(cornerRadius: CBRadius.popup))
+        case .usage:
+            if let usage = viewModel.usage {
                 popupChrome {
                     VStack(spacing: 0) {
-                        NormalUsageView(usage: usage)
+                        if viewModel.shouldShowCachedBanner, let reason = viewModel.cachedDataReason {
+                            CachedDataBanner(reason: reason)
+                            Spacer().frame(height: 12)
+                        }
+
+                        if viewModel.isFullyMaxed {
+                            GameOverView(usage: usage)
+                        } else {
+                            NormalUsageView(usage: usage)
+                        }
                         Spacer().frame(height: 12)
                         FreshnessIndicator(fetchedAt: viewModel.fetchedAt, freshness: viewModel.freshness)
                     }
                 }
             }
-        } else {
-            LoadingRetroView()
+        case .loading:
+            LoadingRetroView(title: "LOADING")
                 .frame(width: CBSpacing.popupWidth, height: CBSpacing.popupHeight)
                 .background(CBColor.base)
                 .clipShape(RoundedRectangle(cornerRadius: CBRadius.popup))

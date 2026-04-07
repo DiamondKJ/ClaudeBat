@@ -10,7 +10,7 @@ public struct MenuBarLabel: View {
 
     public var body: some View {
         HStack(spacing: 4) {
-            if let usage = viewModel.usage {
+            if let usage = viewModel.usage, viewModel.shouldShowMenuBarUsage {
                 Text("\(usage.fiveHour.remainingInt)")
                     .font(.system(size: 11, weight: .regular, design: .rounded))
                     .monospacedDigit()
@@ -19,7 +19,11 @@ public struct MenuBarLabel: View {
 
                 MenuBarBattery(percentage: usage.fiveHour.remaining)
             } else {
-                PixelBatView(expression: .dead, pixelSize: 1, color: CBColor.accent)
+                PixelBatView(
+                    expression: viewModel.sessionDataNeedsRefresh ? .sleeping : .dead,
+                    pixelSize: 1,
+                    color: CBColor.accent
+                )
             }
         }
     }

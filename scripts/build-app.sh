@@ -16,8 +16,15 @@ APP_NAME="ClaudeBat"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 BUNDLE_ID="com.diamondkj.claudebat"
 VERSION="${VERSION_OVERRIDE:-$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "1.0.0")}"
+BUILD_FLAVOR="standard"
+if [[ "${LOCAL_MONITOR_BUILD:-0}" == "1" ]]; then
+    BUILD_FLAVOR="local-monitor"
+fi
+GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo "unknown")"
 
 echo "=== Building $APP_NAME v$VERSION ==="
+echo "Flavor: $BUILD_FLAVOR"
+echo "Git commit: $GIT_COMMIT"
 
 # ── Step 1: Clean build directory ──
 rm -rf "$BUILD_DIR"
@@ -80,6 +87,10 @@ cat > "$CONTENTS/Info.plist" << PLIST
 	<string>$VERSION</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>CBBuildFlavor</key>
+	<string>$BUILD_FLAVOR</string>
+	<key>CBGitCommit</key>
+	<string>$GIT_COMMIT</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LSUIElement</key>

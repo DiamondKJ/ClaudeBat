@@ -2,6 +2,12 @@ import SwiftUI
 import AppKit
 
 struct NoAuthView: View {
+    enum Mode {
+        case setup
+        case reconnect
+    }
+
+    var mode: Mode = .setup
     var forceInstalled: Bool? = nil
 
     private var claudeCodeInstalled: Bool {
@@ -21,14 +27,22 @@ struct NoAuthView: View {
             Spacer().frame(height: 16)
 
             // Title
-            Text("No Token Found")
+            Text(title)
                 .font(CBFont.pixelFont(size: 16))
                 .foregroundStyle(CBColor.textPrimary)
 
             Spacer().frame(height: 16)
 
+            Text(summary)
+                .font(CBFont.modelLabel)
+                .foregroundStyle(CBColor.textMuted)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
+
+            Spacer().frame(height: 16)
+
             if claudeCodeInstalled {
-                Text("Log in to Claude Code:")
+                Text(primaryInstruction)
                     .font(CBFont.modelLabel)
                     .foregroundStyle(CBColor.textMuted)
 
@@ -73,6 +87,33 @@ struct NoAuthView: View {
             return process.terminationStatus == 0
         } catch {
             return false
+        }
+    }
+
+    private var title: String {
+        switch mode {
+        case .setup:
+            return "No Token Found"
+        case .reconnect:
+            return "Reconnect Claude"
+        }
+    }
+
+    private var summary: String {
+        switch mode {
+        case .setup:
+            return "ClaudeBat needs your Claude Code login before it can read usage."
+        case .reconnect:
+            return "ClaudeBat needs a fresh Claude Code login before it can refresh usage."
+        }
+    }
+
+    private var primaryInstruction: String {
+        switch mode {
+        case .setup:
+            return "Log in to Claude Code:"
+        case .reconnect:
+            return "Refresh your Claude Code login:"
         }
     }
 }

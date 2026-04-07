@@ -34,6 +34,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupPopover()
         setupContextPopover()
         setupEventMonitor()
+        viewModel.recordAppLaunch()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        viewModel.recordAppTermination()
     }
 
     // MARK: - Status Item
@@ -160,8 +165,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showAbout() {
         let alert = NSAlert()
         alert.messageText = "ClaudeBat"
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
-        alert.informativeText = "Your Claude usage. One glance away.\n\nVersion \(version)"
+        var lines = ["Your Claude usage. One glance away."]
+        lines.append("")
+        lines.append("Version \(viewModel.buildInfo.appVersion)")
+        if let buildLine = viewModel.buildInfo.aboutBuildLine {
+            lines.append(buildLine)
+        }
+        alert.informativeText = lines.joined(separator: "\n")
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
