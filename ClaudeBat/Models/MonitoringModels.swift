@@ -94,6 +94,15 @@ public struct MonitorStatus: Codable, Equatable, Sendable {
     public var buildFlavor: String
     public var gitCommit: String
     public var staleReason: CachedDataReason?
+    public var cachedSessionResetAt: Date?
+    public var lastSuccessfulUsageSessionResetAt: Date?
+    public var lastSuccessfulAuthRefreshAt: Date?
+    public var lastSuccessfulAuthRefreshMethod: AuthRecoveryMethod?
+    public var lastTokenFingerprintChangedAt: Date?
+    public var authRecoveryPhase: AuthRecoveryPhase?
+    public var authRecoveryResult: AuthRecoveryResult?
+    public var lastRecoveryAttemptAt: Date?
+    public var lastHiddenClaudeActivationAt: Date?
 
     public init(
         pid: Int32 = ProcessInfo.processInfo.processIdentifier,
@@ -115,7 +124,16 @@ public struct MonitorStatus: Codable, Equatable, Sendable {
         lastWakeSource: WakeSource? = nil,
         buildFlavor: String = "standard",
         gitCommit: String = "unknown",
-        staleReason: CachedDataReason? = nil
+        staleReason: CachedDataReason? = nil,
+        cachedSessionResetAt: Date? = nil,
+        lastSuccessfulUsageSessionResetAt: Date? = nil,
+        lastSuccessfulAuthRefreshAt: Date? = nil,
+        lastSuccessfulAuthRefreshMethod: AuthRecoveryMethod? = nil,
+        lastTokenFingerprintChangedAt: Date? = nil,
+        authRecoveryPhase: AuthRecoveryPhase? = nil,
+        authRecoveryResult: AuthRecoveryResult? = nil,
+        lastRecoveryAttemptAt: Date? = nil,
+        lastHiddenClaudeActivationAt: Date? = nil
     ) {
         self.pid = pid
         self.appRunning = appRunning
@@ -137,6 +155,15 @@ public struct MonitorStatus: Codable, Equatable, Sendable {
         self.buildFlavor = buildFlavor
         self.gitCommit = gitCommit
         self.staleReason = staleReason
+        self.cachedSessionResetAt = cachedSessionResetAt
+        self.lastSuccessfulUsageSessionResetAt = lastSuccessfulUsageSessionResetAt
+        self.lastSuccessfulAuthRefreshAt = lastSuccessfulAuthRefreshAt
+        self.lastSuccessfulAuthRefreshMethod = lastSuccessfulAuthRefreshMethod
+        self.lastTokenFingerprintChangedAt = lastTokenFingerprintChangedAt
+        self.authRecoveryPhase = authRecoveryPhase
+        self.authRecoveryResult = authRecoveryResult
+        self.lastRecoveryAttemptAt = lastRecoveryAttemptAt
+        self.lastHiddenClaudeActivationAt = lastHiddenClaudeActivationAt
     }
 
     enum CodingKeys: String, CodingKey {
@@ -160,6 +187,15 @@ public struct MonitorStatus: Codable, Equatable, Sendable {
         case buildFlavor = "build_flavor"
         case gitCommit = "git_commit"
         case staleReason = "stale_reason"
+        case cachedSessionResetAt = "cached_session_reset_at"
+        case lastSuccessfulUsageSessionResetAt = "last_successful_usage_session_reset_at"
+        case lastSuccessfulAuthRefreshAt = "last_successful_auth_refresh_at"
+        case lastSuccessfulAuthRefreshMethod = "last_successful_auth_refresh_method"
+        case lastTokenFingerprintChangedAt = "last_token_fingerprint_changed_at"
+        case authRecoveryPhase = "auth_recovery_phase"
+        case authRecoveryResult = "auth_recovery_result"
+        case lastRecoveryAttemptAt = "last_recovery_attempt_at"
+        case lastHiddenClaudeActivationAt = "last_hidden_claude_activation_at"
     }
 }
 
@@ -195,6 +231,15 @@ public struct MonitorEventRecord: Codable, Sendable {
     public let lastWakeAt: Date?
     public let lastWakeSource: String?
     public let staleReason: String?
+    public let cachedSessionResetAt: Date?
+    public let lastSuccessfulUsageSessionResetAt: Date?
+    public let lastSuccessfulAuthRefreshAt: Date?
+    public let lastSuccessfulAuthRefreshMethod: String?
+    public let lastTokenFingerprintChangedAt: Date?
+    public let authRecoveryPhase: String?
+    public let authRecoveryResult: String?
+    public let lastRecoveryAttemptAt: Date?
+    public let lastHiddenClaudeActivationAt: Date?
 
     public init(event: MonitorEvent, status: MonitorStatus, buildInfo: AppBuildInfo, timestamp: Date = Date()) {
         self.timestamp = timestamp
@@ -228,6 +273,15 @@ public struct MonitorEventRecord: Codable, Sendable {
         self.lastWakeAt = status.lastWakeAt
         self.lastWakeSource = status.lastWakeSource?.rawValue
         self.staleReason = status.staleReason?.rawValue
+        self.cachedSessionResetAt = status.cachedSessionResetAt
+        self.lastSuccessfulUsageSessionResetAt = status.lastSuccessfulUsageSessionResetAt
+        self.lastSuccessfulAuthRefreshAt = status.lastSuccessfulAuthRefreshAt
+        self.lastSuccessfulAuthRefreshMethod = status.lastSuccessfulAuthRefreshMethod?.rawValue
+        self.lastTokenFingerprintChangedAt = status.lastTokenFingerprintChangedAt
+        self.authRecoveryPhase = status.authRecoveryPhase?.rawValue
+        self.authRecoveryResult = status.authRecoveryResult?.rawValue
+        self.lastRecoveryAttemptAt = status.lastRecoveryAttemptAt
+        self.lastHiddenClaudeActivationAt = status.lastHiddenClaudeActivationAt
     }
 
     public var logLevel: OSLogType {
@@ -258,6 +312,8 @@ public struct MonitorEventRecord: Codable, Sendable {
             "status=\(lastHTTPStatus.map(String.init) ?? "-")",
             "failures=\(consecutiveFailures)",
             "poll=\(currentPollIntervalSeconds)",
+            "auth_phase=\(authRecoveryPhase ?? "-")",
+            "auth_result=\(authRecoveryResult ?? "-")",
             "message=\(message ?? "-")",
         ]
         return fields.joined(separator: " ")
@@ -295,5 +351,14 @@ public struct MonitorEventRecord: Codable, Sendable {
         case lastWakeAt = "last_wake_at"
         case lastWakeSource = "last_wake_source"
         case staleReason = "stale_reason"
+        case cachedSessionResetAt = "cached_session_reset_at"
+        case lastSuccessfulUsageSessionResetAt = "last_successful_usage_session_reset_at"
+        case lastSuccessfulAuthRefreshAt = "last_successful_auth_refresh_at"
+        case lastSuccessfulAuthRefreshMethod = "last_successful_auth_refresh_method"
+        case lastTokenFingerprintChangedAt = "last_token_fingerprint_changed_at"
+        case authRecoveryPhase = "auth_recovery_phase"
+        case authRecoveryResult = "auth_recovery_result"
+        case lastRecoveryAttemptAt = "last_recovery_attempt_at"
+        case lastHiddenClaudeActivationAt = "last_hidden_claude_activation_at"
     }
 }

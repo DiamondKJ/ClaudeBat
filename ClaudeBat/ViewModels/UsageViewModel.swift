@@ -42,7 +42,11 @@ public final class UsageViewModel {
     private let api: any UsageFetching
     private let budget: any BudgetTracking
     private var cache: any UsageCaching
+    private let recoveryStore: any RecoveryStatePersisting
     private let monitor: any AppMonitoring
+    private let authRefresher: any AuthRefreshing
+    private let claudeCLIRecoverer: any ClaudeCLIRecovering
+    private let reachability: any NetworkReachabilityChecking
     private let wakeCoalescingWindow: TimeInterval
     private let wakeAuthRetryInterval: TimeInterval
 
@@ -69,6 +73,11 @@ public final class UsageViewModel {
     private var lastWakeNotificationAt: Date?
     private var activeWakeRecoveryStartedAt: Date?
     private var wakeAuthRetryPending = false
+    private var recoverySnapshot: RecoverySnapshot
+    private var sessionClassifierDecision: SessionClassifierDecision = .fetchUsageNormally
+    private var authRecoveryPhase: AuthRecoveryPhase = .idle
+    private var authRecoveryResult: AuthRecoveryResult?
+    private var isAuthRecoveryInFlight = false
 
     private static let basePollOpen: TimeInterval = 120
     private static let basePollClosed: TimeInterval = 120
@@ -77,6 +86,8 @@ public final class UsageViewModel {
     private static let decodingRetryInterval: TimeInterval = 60
     private static let retryAfterBufferSeconds = 5
     private static let wakeAuthRetryGraceWindow: TimeInterval = 120
+    private static let hiddenClaudeCooldown: TimeInterval = 20 * 60
+    private static let hiddenClaudeTimeout: TimeInterval = 20
 
     private var pollInterval: TimeInterval {
         let base = popoverIsOpen ? Self.basePollOpen : Self.basePollClosed
@@ -99,6 +110,38 @@ public final class UsageViewModel {
         return freshness != .fresh
     }
 
+    private var hasRefreshableCredentials: Bool {
+        guard let snapshot = tokenProvider.readOAuthSnapshot() else { return false }
+        guard let refreshToken = snapshot.refreshToken else { return false }
+        return !refreshToken.isEmpty
+    }
+
+    private var cachedSessionHasEnded: Bool {
+        guard let resetAt = usage?.fiveHour.resetsAtDate else { return false }
+        return Date() > resetAt
+    }
+
+    private var cachedUsageBelongsToCurrentSession: Bool {
+        guard let resetAt = usage?.fiveHour.resetsAtDate else { return usage != nil }
+        if Date() <= resetAt {
+            return true
+        }
+        guard let lastSuccessAt else { return false }
+        return lastSuccessAt >= resetAt
+    }
+
+    private var needsSessionAwareRecovery: Bool {
+        usage != nil && !cachedUsageBelongsToCurrentSession
+    }
+
+    private var shouldPreemptivelyRefreshAuth: Bool {
+        needsSessionAwareRecovery && hasRefreshableCredentials
+    }
+
+    private var isRecoveringAuth: Bool {
+        isAuthRecoveryInFlight || authRecoveryPhase == .awaitingUsageValidation
+    }
+
     // MARK: - Init
 
     public init(
@@ -106,7 +149,11 @@ public final class UsageViewModel {
         api: any UsageFetching = UsageAPIService(),
         budget: any BudgetTracking = SlidingWindowBudget(),
         cache: any UsageCaching = UsageCache(),
+        recoveryStore: any RecoveryStatePersisting = RecoveryStateStore(),
         monitor: (any AppMonitoring)? = nil,
+        authRefresher: (any AuthRefreshing)? = nil,
+        claudeCLIRecoverer: any ClaudeCLIRecovering = ClaudeCLIRecoveryService(),
+        reachability: any NetworkReachabilityChecking = NetworkReachabilityService(),
         buildInfo: AppBuildInfo = .current,
         wakeCoalescingWindow: TimeInterval = 5,
         wakeAuthRetryInterval: TimeInterval = 30,
@@ -116,16 +163,25 @@ public final class UsageViewModel {
         self.api = api
         self.budget = budget
         self.cache = cache
+        self.recoveryStore = recoveryStore
         self.buildInfo = buildInfo
         self.monitor = monitor ?? MonitorService(buildInfo: buildInfo)
+        self.authRefresher = authRefresher ?? OAuthRefreshService(tokenProvider: tokenProvider)
+        self.claudeCLIRecoverer = claudeCLIRecoverer
+        self.reachability = reachability
         self.wakeCoalescingWindow = wakeCoalescingWindow
         self.wakeAuthRetryInterval = wakeAuthRetryInterval
+        self.recoverySnapshot = recoveryStore.read() ?? RecoverySnapshot()
+        self.authRecoveryPhase = self.recoverySnapshot.authRecoveryPhase ?? .idle
+        self.authRecoveryResult = self.recoverySnapshot.lastRecoveryResult
 
         if let cached = cache.read() {
             usage = cached.value
             fetchedAt = cached.fetchedAt
-            lastSuccessAt = cached.fetchedAt
+            lastSuccessAt = recoverySnapshot.lastSuccessfulUsageAt ?? cached.fetchedAt
             freshness = cached.age > 60 ? .stale : .fresh
+        } else {
+            lastSuccessAt = recoverySnapshot.lastSuccessfulUsageAt
         }
 
         if startImmediately {
@@ -197,10 +253,390 @@ public final class UsageViewModel {
         recordMonitorEvent(MonitorEvent(category: .lifecycle, action: "popover_close"))
     }
 
+    // MARK: - Session-Aware Recovery
+
+    @MainActor
+    private func handleSessionPreflightIfNeeded(for trigger: FetchTrigger) async -> Bool {
+        guard shouldRunSessionClassifier(for: trigger) else { return false }
+
+        let decision = classifySession(for: trigger)
+        sessionClassifierDecision = decision
+        recordMonitorEvent(
+            MonitorEvent(
+                category: .auth,
+                action: "session_classifier_decision",
+                trigger: trigger,
+                message: decision.rawValue
+            )
+        )
+
+        switch decision {
+        case .fetchUsageNormally:
+            return false
+        case .showRecoveringAndRetryLater:
+            return true
+        case .showOffline:
+            if usage == nil {
+                errorMessage = "ClaudeBat could not reach the internet to refresh your usage."
+            } else {
+                freshness = .stale
+                setCachedDataReason(.networkError)
+            }
+            return true
+        case .showReconnect:
+            if usage == nil {
+                freshness = .empty
+            } else {
+                freshness = .stale
+                setCachedDataReason(hasNoAuth ? .noToken : .authInvalid)
+            }
+            authRecoveryPhase = .failedRequiresReconnect
+            authRecoveryResult = .missingCredentials
+            persistRecoverySnapshot {
+                $0.authRecoveryPhase = self.authRecoveryPhase
+                $0.lastRecoveryAttemptAt = Date()
+                $0.lastRecoveryResult = .missingCredentials
+            }
+            recordMonitorEvent(
+                MonitorEvent(
+                    category: .auth,
+                    action: "manual_reconnect_required",
+                    trigger: trigger,
+                    message: "automatic recovery unavailable"
+                )
+            )
+            return true
+        case .refreshAuthThenFetch:
+            await startAuthRecovery(reason: trigger.rawValue, trigger: trigger)
+            return true
+        }
+    }
+
+    private func shouldRunSessionClassifier(for trigger: FetchTrigger) -> Bool {
+        if isAuthRecoveryInFlight { return true }
+
+        switch trigger {
+        case .appLaunch, .screenWake, .machineWake:
+            return true
+        case .popoverOpen:
+            return fetchedAt == nil || sessionDataNeedsRefresh || isUsingCachedData
+        case .pollTimer:
+            return sessionDataNeedsRefresh || lastFailureReason == FetchOutcome.http401.rawValue
+        case .resetBoundary, .selfHeal:
+            return false
+        }
+    }
+
+    private func classifySession(for trigger: FetchTrigger) -> SessionClassifierDecision {
+        if isAuthRecoveryInFlight {
+            return .showRecoveringAndRetryLater
+        }
+
+        if !reachability.isReachable() {
+            return .showOffline
+        }
+
+        if shouldPreemptivelyRefreshAuth {
+            recordMonitorEvent(
+                MonitorEvent(
+                    category: .auth,
+                    action: "previous_session_detected",
+                    trigger: trigger,
+                    message: "cached usage belongs to a previous session"
+                )
+            )
+            return .refreshAuthThenFetch
+        }
+
+        if sessionDataNeedsRefresh {
+            return hasRefreshableCredentials ? .refreshAuthThenFetch : .showReconnect
+        }
+
+        if lastFailureReason == FetchOutcome.http401.rawValue || cachedDataReason == .authInvalid {
+            return hasRefreshableCredentials ? .refreshAuthThenFetch : .showReconnect
+        }
+
+        return .fetchUsageNormally
+    }
+
+    @MainActor
+    private func startAuthRecovery(reason: String, trigger: FetchTrigger) async {
+        guard !isAuthRecoveryInFlight else { return }
+        guard reachability.isReachable() else {
+            authRecoveryResult = .offline
+            authRecoveryPhase = .failedRequiresReconnect
+            return
+        }
+        guard let currentSnapshot = tokenProvider.readOAuthSnapshot() else {
+            authRecoveryPhase = .failedRequiresReconnect
+            authRecoveryResult = .missingCredentials
+            if usage == nil {
+                freshness = .empty
+            } else {
+                freshness = .stale
+                setCachedDataReason(.noToken)
+            }
+            persistRecoverySnapshot {
+                $0.authRecoveryPhase = self.authRecoveryPhase
+                $0.lastRecoveryAttemptAt = Date()
+                $0.lastRecoveryResult = self.authRecoveryResult
+            }
+            recordMonitorEvent(
+                MonitorEvent(category: .auth, action: "manual_reconnect_required", trigger: trigger, message: "missing OAuth credentials")
+            )
+            return
+        }
+
+        isAuthRecoveryInFlight = true
+        authRecoveryPhase = .nativeRefreshInFlight
+        authRecoveryResult = nil
+        wakeAuthRetryPending = false
+        pollingTimer?.invalidate()
+        freshness = usage == nil ? .empty : .refreshing
+        persistRecoverySnapshot {
+            $0.authRecoveryPhase = .nativeRefreshInFlight
+            $0.lastRecoveryAttemptAt = Date()
+            $0.lastRecoveryResult = nil
+        }
+        recordMonitorEvent(
+            MonitorEvent(category: .auth, action: "auth_recovery_started", trigger: trigger, message: reason)
+        )
+        recordMonitorEvent(
+            MonitorEvent(category: .auth, action: "native_refresh_started", trigger: trigger, message: "attempting refresh token exchange")
+        )
+
+        let result = await authRefresher.refreshCredentials(currentSnapshot: currentSnapshot)
+        switch result {
+        case .success(let newFingerprint):
+            authRecoveryPhase = .awaitingUsageValidation
+            authRecoveryResult = nil
+            persistRecoverySnapshot {
+                let now = Date()
+                $0.authRecoveryPhase = .awaitingUsageValidation
+                $0.lastSuccessfulAuthRefreshAt = now
+                $0.lastSuccessfulAuthRefreshMethod = .native
+                if $0.lastTokenFingerprint != newFingerprint {
+                    $0.lastTokenFingerprint = newFingerprint
+                    $0.lastTokenFingerprintChangedAt = now
+                }
+            }
+            recordMonitorEvent(
+                MonitorEvent(category: .auth, action: "native_refresh_succeeded", trigger: trigger, message: "refresh token exchange completed")
+            )
+            let validationStartedAt = Date()
+            await fetchIfBudgetAllows(trigger: trigger, allowSessionPreflight: false)
+            if usageValidationSucceeded(since: validationStartedAt) {
+                finishSuccessfulRecovery(trigger: trigger)
+            } else if lastFailureReason == FetchOutcome.rateLimited.rawValue || lastFailureReason == FetchOutcome.serverCooldownBlocked.rawValue {
+                isAuthRecoveryInFlight = false
+                authRecoveryPhase = .awaitingUsageValidation
+                recordMonitorEvent(
+                    MonitorEvent(
+                        category: .auth,
+                        action: "usage_validation_after_refresh_failed",
+                        trigger: trigger,
+                        outcome: .rateLimited,
+                        message: "usage validation is waiting on retry-after"
+                    )
+                )
+            } else if lastFailureReason == FetchOutcome.networkError.rawValue {
+                isAuthRecoveryInFlight = false
+                authRecoveryPhase = .failedRequiresReconnect
+                authRecoveryResult = .offline
+                persistRecoverySnapshot {
+                    $0.authRecoveryPhase = .failedRequiresReconnect
+                    $0.lastRecoveryAttemptAt = Date()
+                    $0.lastRecoveryResult = .offline
+                }
+            } else if lastFailureReason == FetchOutcome.decodingError.rawValue {
+                isAuthRecoveryInFlight = false
+                authRecoveryPhase = .awaitingUsageValidation
+                recordMonitorEvent(
+                    MonitorEvent(
+                        category: .auth,
+                        action: "usage_validation_after_refresh_failed",
+                        trigger: trigger,
+                        outcome: .decodingError,
+                        message: "usage validation returned an undecodable response"
+                    )
+                )
+            } else {
+                await attemptClaudeCLIFallback(trigger: trigger)
+            }
+        case .missingRefreshToken:
+            failRecovery(.missingCredentials, trigger: trigger, reason: "missing refresh token")
+        case .networkFailure(let message):
+            authRecoveryResult = .offline
+            authRecoveryPhase = .failedRequiresReconnect
+            if usage == nil {
+                errorMessage = "ClaudeBat could not reach the internet to restore Claude Code."
+            } else {
+                freshness = .stale
+                setCachedDataReason(.networkError)
+            }
+            persistRecoverySnapshot {
+                $0.authRecoveryPhase = self.authRecoveryPhase
+                $0.lastRecoveryAttemptAt = Date()
+                $0.lastRecoveryResult = .offline
+            }
+            recordMonitorEvent(
+                MonitorEvent(category: .auth, action: "native_refresh_failed", trigger: trigger, message: message)
+            )
+            isAuthRecoveryInFlight = false
+        case .authRejected(let code):
+            recordMonitorEvent(
+                MonitorEvent(category: .auth, action: "native_refresh_failed", trigger: trigger, outcome: .http401, message: "refresh rejected (\(code.map(String.init) ?? "unknown"))")
+            )
+            await attemptClaudeCLIFallback(trigger: trigger)
+        case .unexpectedFailure(let message):
+            recordMonitorEvent(
+                MonitorEvent(category: .auth, action: "native_refresh_failed", trigger: trigger, message: message)
+            )
+            await attemptClaudeCLIFallback(trigger: trigger)
+        }
+    }
+
+    @MainActor
+    private func attemptClaudeCLIFallback(trigger: FetchTrigger) async {
+        let now = Date()
+        if let last = recoverySnapshot.lastHiddenClaudeActivationAt,
+           now.timeIntervalSince(last) < Self.hiddenClaudeCooldown {
+            failRecovery(.timedOut, trigger: trigger, reason: "hidden Claude activation is cooling down")
+            return
+        }
+
+        authRecoveryPhase = .claudeCLIRecoveryInFlight
+        persistRecoverySnapshot {
+            $0.authRecoveryPhase = .claudeCLIRecoveryInFlight
+            $0.lastHiddenClaudeActivationAt = now
+        }
+        recordMonitorEvent(
+            MonitorEvent(category: .auth, action: "claude_cli_recovery_started", trigger: trigger, message: "launching hidden Claude session")
+        )
+
+        let baseline = tokenProvider.readOAuthSnapshot()
+        let result = await claudeCLIRecoverer.recoverAuth(
+            baselineFingerprint: baseline?.fingerprint,
+            baselineExpiresAt: baseline?.expiresAt,
+            tokenProvider: tokenProvider,
+            timeout: Self.hiddenClaudeTimeout
+        )
+
+        switch result {
+        case .success:
+            persistRecoverySnapshot {
+                let now = Date()
+                $0.lastSuccessfulAuthRefreshAt = now
+                $0.lastSuccessfulAuthRefreshMethod = .claudeCLI
+                let newFingerprint = self.tokenProvider.tokenFingerprint()
+                if $0.lastTokenFingerprint != newFingerprint {
+                    $0.lastTokenFingerprint = newFingerprint
+                    $0.lastTokenFingerprintChangedAt = now
+                }
+                $0.authRecoveryPhase = .awaitingUsageValidation
+            }
+            recordMonitorEvent(
+                MonitorEvent(category: .auth, action: "claude_cli_recovery_succeeded", trigger: trigger, message: "hidden Claude session refreshed auth")
+            )
+            authRecoveryPhase = .awaitingUsageValidation
+            let validationStartedAt = Date()
+            await fetchIfBudgetAllows(trigger: trigger, allowSessionPreflight: false)
+            if usageValidationSucceeded(since: validationStartedAt) {
+                finishSuccessfulRecovery(trigger: trigger)
+            } else if lastFailureReason == FetchOutcome.rateLimited.rawValue || lastFailureReason == FetchOutcome.serverCooldownBlocked.rawValue {
+                isAuthRecoveryInFlight = false
+                authRecoveryPhase = .awaitingUsageValidation
+            } else if lastFailureReason == FetchOutcome.decodingError.rawValue {
+                isAuthRecoveryInFlight = false
+                authRecoveryPhase = .awaitingUsageValidation
+                recordMonitorEvent(
+                    MonitorEvent(
+                        category: .auth,
+                        action: "usage_validation_after_refresh_failed",
+                        trigger: trigger,
+                        outcome: .decodingError,
+                        message: "usage validation returned an undecodable response"
+                    )
+                )
+            } else {
+                failRecovery(.authRejected, trigger: trigger, reason: "usage validation still failed after hidden Claude recovery")
+            }
+        case .timedOut:
+            failRecovery(.timedOut, trigger: trigger, reason: "hidden Claude recovery timed out")
+        case .launchFailed(let message):
+            failRecovery(.unexpectedFailure, trigger: trigger, reason: message)
+        }
+    }
+
+    private func usageValidationSucceeded(since startedAt: Date) -> Bool {
+        guard let lastSuccessAt else { return false }
+        return lastSuccessAt >= startedAt
+    }
+
+    @MainActor
+    private func finishSuccessfulRecovery(trigger: FetchTrigger) {
+        isAuthRecoveryInFlight = false
+        authRecoveryPhase = .idle
+        authRecoveryResult = .success
+        clearWakeRecoveryState()
+        persistRecoverySnapshot {
+            $0.authRecoveryPhase = .idle
+            $0.lastRecoveryAttemptAt = Date()
+            $0.lastRecoveryResult = .success
+        }
+        recordMonitorEvent(
+            MonitorEvent(category: .auth, action: "auth_recovery_succeeded", trigger: trigger, message: "usage validation succeeded")
+        )
+    }
+
+    @MainActor
+    private func failRecovery(_ result: AuthRecoveryResult, trigger: FetchTrigger, reason: String) {
+        isAuthRecoveryInFlight = false
+        authRecoveryPhase = .failedRequiresReconnect
+        authRecoveryResult = result
+        if usage == nil {
+            freshness = .empty
+            errorMessage = "ClaudeBat couldn't restore Claude Code automatically."
+        } else {
+            freshness = .stale
+            setCachedDataReason(hasNoAuth ? .noToken : .authInvalid)
+        }
+        persistRecoverySnapshot {
+            $0.authRecoveryPhase = .failedRequiresReconnect
+            $0.lastRecoveryAttemptAt = Date()
+            $0.lastRecoveryResult = result
+        }
+        recordMonitorEvent(
+            MonitorEvent(category: .auth, action: "auth_recovery_failed", trigger: trigger, message: reason)
+        )
+        recordMonitorEvent(
+            MonitorEvent(category: .auth, action: "manual_reconnect_required", trigger: trigger, message: reason)
+        )
+    }
+
+    private func persistRecoverySnapshot(_ mutate: (inout RecoverySnapshot) -> Void) {
+        var snapshot = recoverySnapshot
+        mutate(&snapshot)
+        recoverySnapshot = snapshot
+        recoveryStore.write(snapshot)
+    }
+
     // MARK: - Fetch Logic
 
     @MainActor
     func fetchIfBudgetAllows(trigger originalTrigger: FetchTrigger = .pollTimer) async {
+        await fetchIfBudgetAllows(trigger: originalTrigger, allowSessionPreflight: true)
+    }
+
+    @MainActor
+    private func fetchIfBudgetAllows(trigger originalTrigger: FetchTrigger = .pollTimer, allowSessionPreflight: Bool) async {
+        if allowSessionPreflight {
+            let handled = await handleSessionPreflightIfNeeded(for: originalTrigger)
+            if handled {
+                return
+            }
+        }
+
         if isFetching {
             recordMonitorEvent(
                 MonitorEvent(
@@ -337,6 +773,15 @@ public final class UsageViewModel {
             restartPolling(reason: "fetch_success")
             stopBatWink()
             clearCachedDataState()
+            persistRecoverySnapshot {
+                $0.lastSuccessfulUsageAt = successAt
+                $0.lastSuccessfulUsageSessionResetAt = response.fiveHour.resetsAtDate
+                $0.authRecoveryPhase = self.authRecoveryPhase
+                if let fingerprint = self.tokenProvider.tokenFingerprint(), $0.lastTokenFingerprint != fingerprint {
+                    $0.lastTokenFingerprint = fingerprint
+                    $0.lastTokenFingerprintChangedAt = successAt
+                }
+            }
 
             recordMonitorEvent(
                 MonitorEvent(
@@ -347,6 +792,17 @@ public final class UsageViewModel {
                     message: "usage refreshed"
                 )
             )
+            if isAuthRecoveryInFlight || authRecoveryPhase == .awaitingUsageValidation {
+                recordMonitorEvent(
+                    MonitorEvent(
+                        category: .auth,
+                        action: "usage_validation_after_refresh_succeeded",
+                        trigger: trigger,
+                        outcome: .success,
+                        message: "fresh usage validated after auth recovery"
+                    )
+                )
+            }
         } catch let error as UsageAPIError {
             stopBatWink()
             await handleUsageAPIError(error, trigger: trigger)
@@ -531,7 +987,7 @@ public final class UsageViewModel {
     }
 
     public var popoverScreen: PopoverScreen {
-        if wakeAuthRetryPending {
+        if isRecoveringAuth || wakeAuthRetryPending {
             return .recovering
         }
 
@@ -579,8 +1035,16 @@ public final class UsageViewModel {
     }
 
     public var recoveryMessage: String {
+        if authRecoveryPhase == .nativeRefreshInFlight {
+            return "Restoring Claude Code connection."
+        }
+
+        if authRecoveryPhase == .claudeCLIRecoveryInFlight {
+            return "Refreshing Claude Code in the background."
+        }
+
         if wakeAuthRetryPending {
-            return "ClaudeBat got a temporary auth response after wake and is retrying once before asking you to reconnect."
+            return "ClaudeBat is retrying Claude Code auth after wake."
         }
 
         switch cachedDataReason {
@@ -598,11 +1062,11 @@ public final class UsageViewModel {
     }
 
     public var shouldShowMenuBarUsage: Bool {
-        usage != nil && !sessionDataNeedsRefresh && !wakeAuthRetryPending
+        usage != nil && !sessionDataNeedsRefresh && !wakeAuthRetryPending && !isRecoveringAuth
     }
 
     public var hasNoAuth: Bool {
-        tokenProvider.readToken() == nil
+        tokenProvider.readOAuthSnapshot() == nil && tokenProvider.readToken() == nil
     }
 
     public var hasError: Bool {
@@ -678,33 +1142,8 @@ public final class UsageViewModel {
             lastRetryAfterSeconds = nil
 
             if code == 401 {
-                if shouldRetryAuthAfterWake401() {
-                    lastFailureReason = FetchOutcome.http401.rawValue
-                    consecutiveFailures += 1
-                    wakeAuthRetryPending = true
-                    if usage == nil {
-                        freshness = .empty
-                        errorMessage = nil
-                    } else {
-                        freshness = .refreshing
-                    }
-                    restartPolling(reason: "wake_auth_retry", after: wakeAuthRetryInterval)
-                    recordMonitorEvent(
-                        MonitorEvent(
-                            category: .auth,
-                            action: "retrying_after_wake",
-                            trigger: trigger,
-                            outcome: .http401,
-                            message: "usage endpoint returned 401 after wake; retrying once before reconnect state"
-                        )
-                    )
-                    return
-                }
-
-                wakeAuthRetryPending = false
                 lastFailureReason = FetchOutcome.http401.rawValue
                 consecutiveFailures += 1
-                restartPolling(reason: "http_error_backoff")
                 if usage == nil {
                     errorMessage = "Claude Code auth expired. Open Claude Code and sign in again."
                 } else {
@@ -720,6 +1159,22 @@ public final class UsageViewModel {
                         message: "usage endpoint returned 401"
                     )
                 )
+                if isAuthRecoveryInFlight || authRecoveryPhase == .awaitingUsageValidation {
+                    recordMonitorEvent(
+                        MonitorEvent(
+                            category: .auth,
+                            action: "usage_validation_after_refresh_failed",
+                            trigger: trigger,
+                            outcome: .http401,
+                            message: "usage validation returned 401"
+                        )
+                    )
+                } else {
+                    Task { @MainActor in
+                        await Task.yield()
+                        await self.startAuthRecovery(reason: "http_401", trigger: trigger)
+                    }
+                }
             } else {
                 lastFailureReason = FetchOutcome.httpError.rawValue
                 consecutiveFailures += 1
@@ -966,7 +1421,16 @@ public final class UsageViewModel {
             lastWakeSource: lastWakeSource,
             buildFlavor: buildInfo.buildFlavor,
             gitCommit: buildInfo.gitCommit,
-            staleReason: cachedDataReason
+            staleReason: cachedDataReason,
+            cachedSessionResetAt: usage?.fiveHour.resetsAtDate,
+            lastSuccessfulUsageSessionResetAt: recoverySnapshot.lastSuccessfulUsageSessionResetAt,
+            lastSuccessfulAuthRefreshAt: recoverySnapshot.lastSuccessfulAuthRefreshAt,
+            lastSuccessfulAuthRefreshMethod: recoverySnapshot.lastSuccessfulAuthRefreshMethod,
+            lastTokenFingerprintChangedAt: recoverySnapshot.lastTokenFingerprintChangedAt,
+            authRecoveryPhase: authRecoveryPhase,
+            authRecoveryResult: authRecoveryResult,
+            lastRecoveryAttemptAt: recoverySnapshot.lastRecoveryAttemptAt,
+            lastHiddenClaudeActivationAt: recoverySnapshot.lastHiddenClaudeActivationAt
         )
     }
 }

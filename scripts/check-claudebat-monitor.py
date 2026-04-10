@@ -19,6 +19,8 @@ CACHED_DATA_THRESHOLD_SECONDS = 10 * 60
 RESET_REFRESH_WINDOW_SECONDS = 2 * 60
 LAUNCH_GRACE_SECONDS = 3 * 60
 PROCESS_DRIFT_GRACE_SECONDS = 3 * 60
+RECOVERY_VALIDATION_WINDOW_SECONDS = 3 * 60
+HIDDEN_CLAUDE_COOLDOWN_SECONDS = 20 * 60
 
 
 def parse_time(value):
@@ -287,7 +289,17 @@ def main():
     last_failure = parse_time(status.get("last_failure_at"))
     last_wake = parse_time(status.get("last_wake_at"))
     session_reset = parse_time(status.get("session_resets_at"))
+    cached_session_reset = parse_time(status.get("cached_session_reset_at"))
+    last_successful_usage_session_reset = parse_time(status.get("last_successful_usage_session_reset_at"))
+    last_successful_auth_refresh = parse_time(status.get("last_successful_auth_refresh_at"))
+    last_token_fingerprint_changed = parse_time(status.get("last_token_fingerprint_changed_at"))
+    last_recovery_attempt = parse_time(status.get("last_recovery_attempt_at"))
+    last_hidden_claude_activation = parse_time(status.get("last_hidden_claude_activation_at"))
     cache_age = status.get("cache_age_seconds")
+    auth_recovery_phase = status.get("auth_recovery_phase")
+    auth_recovery_result = status.get("auth_recovery_result")
+    last_successful_auth_refresh_method = status.get("last_successful_auth_refresh_method")
+    last_token_fingerprint = status.get("last_token_fingerprint")
     launch_age_seconds = (now - current_launch).total_seconds() if current_launch else None
     status_mtime = file_mtime(status_path)
     log_mtime = newest_log_mtime(logs_dir)
@@ -303,6 +315,31 @@ def main():
     ]
     recent_budget_streaks = [len(sequence["blocked_followup"]) for sequence in recent_rate_limit_sequences]
     max_recent_budget_streak = max(recent_budget_streaks, default=0)
+    previous_session_records = [
+        record
+        for record in records
+        if record.get("event_category") == "auth" and record.get("action") == "previous_session_detected"
+    ]
+    latest_previous_session = previous_session_records[-1] if previous_session_records else None
+    recovery_attempt_actions = {
+        "auth_recovery_started",
+        "native_refresh_started",
+        "manual_reconnect_required",
+    }
+    hidden_claude_records = [
+        record
+        for record in records
+        if record.get("event_category") == "auth" and record.get("action") == "claude_cli_recovery_started"
+    ]
+    recent_hidden_claude = records_within(
+        hidden_claude_records,
+        HIDDEN_CLAUDE_COOLDOWN_SECONDS,
+        now,
+    )
+    recovery_success_record = latest_record(records, action="auth_recovery_succeeded", category="auth")
+    latest_validation_success = latest_record(records, action="usage_validation_after_refresh_succeeded", category="auth")
+    latest_validation_failure = latest_record(records, action="usage_validation_after_refresh_failed", category="auth")
+    latest_manual_reconnect = latest_record(records, action="manual_reconnect_required", category="auth")
 
     if not status:
         anomalies.append("Monitor status snapshot is missing or unreadable.")
@@ -438,14 +475,31 @@ def main():
 
     recent_401 = records_within(records, REPEATED_401_WINDOW_SECONDS, now, outcome="http_401")
     if len(recent_401) >= REPEATED_401_THRESHOLD:
-        anomalies.append(f"Detected {len(recent_401)} HTTP 401 outcomes in the last 60 minutes.")
-        add_rule(
-            rule_results,
-            "repeated_http_401",
-            "ALERT",
-            f"{len(recent_401)} events",
-            f"Threshold is {REPEATED_401_THRESHOLD} within {REPEATED_401_WINDOW_SECONDS}s.",
+        latest_401 = recent_401[-1]
+        resolved_after_401 = (
+            (recovery_success_record and recovery_success_record.get("_timestamp") and recovery_success_record["_timestamp"] >= latest_401["_timestamp"])
+            or (last_success and last_success >= latest_401["_timestamp"])
         )
+        if resolved_after_401:
+            warnings.append(
+                f"Detected {len(recent_401)} HTTP 401 outcomes in the last 60 minutes, but a later recovery/success was recorded."
+            )
+            add_rule(
+                rule_results,
+                "repeated_http_401",
+                "WARN",
+                f"{len(recent_401)} events",
+                f"Threshold is {REPEATED_401_THRESHOLD} within {REPEATED_401_WINDOW_SECONDS}s, but recovery completed after the latest 401.",
+            )
+        else:
+            anomalies.append(f"Detected {len(recent_401)} HTTP 401 outcomes in the last 60 minutes.")
+            add_rule(
+                rule_results,
+                "repeated_http_401",
+                "ALERT",
+                f"{len(recent_401)} events",
+                f"Threshold is {REPEATED_401_THRESHOLD} within {REPEATED_401_WINDOW_SECONDS}s.",
+            )
     else:
         add_rule(
             rule_results,
@@ -489,14 +543,26 @@ def main():
             and last_wake <= record["_timestamp"] <= last_wake + dt.timedelta(seconds=WAKE_REFRESH_WINDOW_SECONDS)
         ]
         if not wake_success:
-            anomalies.append("A wake event was observed but no successful refresh completed within 2 minutes.")
-            add_rule(
-                rule_results,
-                "wake_refresh_completion",
-                "ALERT",
-                format_time_and_age(last_wake, now),
-                f"No success within {WAKE_REFRESH_WINDOW_SECONDS}s after wake.",
-            )
+            if last_success and last_success > last_wake + dt.timedelta(seconds=WAKE_REFRESH_WINDOW_SECONDS):
+                warnings.append(
+                    "A wake event missed the 2-minute refresh target, but the app recovered later in the same wake cycle."
+                )
+                add_rule(
+                    rule_results,
+                    "wake_refresh_completion",
+                    "WARN",
+                    format_time_and_age(last_wake, now),
+                    f"No success within {WAKE_REFRESH_WINDOW_SECONDS}s after wake, but a later success arrived at {format_time(last_success)}.",
+                )
+            else:
+                anomalies.append("A wake event was observed but no successful refresh completed within 2 minutes.")
+                add_rule(
+                    rule_results,
+                    "wake_refresh_completion",
+                    "ALERT",
+                    format_time_and_age(last_wake, now),
+                    f"No success within {WAKE_REFRESH_WINDOW_SECONDS}s after wake.",
+                )
         else:
             add_rule(
                 rule_results,
@@ -592,6 +658,123 @@ def main():
             details,
         )
 
+    if latest_previous_session:
+        previous_detected_at = latest_previous_session.get("_timestamp")
+        followup = next(
+            (
+                record for record in records
+                if record.get("_timestamp")
+                and previous_detected_at
+                and record["_timestamp"] >= previous_detected_at
+                and record.get("event_category") == "auth"
+                and record.get("action") in recovery_attempt_actions
+            ),
+            None,
+        )
+        if followup:
+            add_rule(
+                rule_results,
+                "previous_session_recovery_attempted",
+                "OK",
+                format_time_and_age(previous_detected_at, now),
+                f"Followed by auth action {followup.get('action')} at {format_time(followup.get('_timestamp'))}.",
+            )
+        else:
+            anomalies.append("A previous-session cache was detected but no auth recovery or reconnect path was started.")
+            add_rule(
+                rule_results,
+                "previous_session_recovery_attempted",
+                "ALERT",
+                format_time_and_age(previous_detected_at, now),
+                "Expected auth recovery or reconnect handling immediately after previous_session_detected.",
+            )
+    else:
+        add_rule(
+            rule_results,
+            "previous_session_recovery_attempted",
+            "SKIP",
+            "n/a",
+            "No previous-session detection event was recorded in the current launch/build session.",
+        )
+
+    recovery_in_progress = auth_recovery_phase in {
+        "native_refresh_in_flight",
+        "claude_cli_recovery_in_flight",
+        "awaiting_usage_validation",
+    }
+    if recovery_in_progress and last_recovery_attempt:
+        if (
+            now - last_recovery_attempt > dt.timedelta(seconds=RECOVERY_VALIDATION_WINDOW_SECONDS)
+            and (not last_success or last_success < last_recovery_attempt)
+            and (not latest_manual_reconnect or latest_manual_reconnect.get("_timestamp", dt.datetime.min.replace(tzinfo=dt.timezone.utc)) < last_recovery_attempt)
+        ):
+            anomalies.append("Auth recovery has been in progress too long without a successful usage validation or reconnect fallback.")
+            add_rule(
+                rule_results,
+                "auth_recovery_completion",
+                "ALERT",
+                f"phase={auth_recovery_phase} started={format_time_and_age(last_recovery_attempt, now)}",
+                f"Expected recovery success or reconnect within {RECOVERY_VALIDATION_WINDOW_SECONDS}s.",
+            )
+        else:
+            add_rule(
+                rule_results,
+                "auth_recovery_completion",
+                "OK",
+                f"phase={auth_recovery_phase} started={format_time_and_age(last_recovery_attempt, now)}",
+                f"Recovery is active and still within the {RECOVERY_VALIDATION_WINDOW_SECONDS}s validation window.",
+            )
+    else:
+        add_rule(
+            rule_results,
+            "auth_recovery_completion",
+            "SKIP",
+            f"phase={auth_recovery_phase or 'n/a'} result={auth_recovery_result or 'n/a'}",
+            "Auth recovery is not currently in flight.",
+        )
+
+    if len(recent_hidden_claude) > 1:
+        anomalies.append("Hidden Claude fallback was invoked more than once inside the cooldown window.")
+        add_rule(
+            rule_results,
+            "hidden_claude_fallback_frequency",
+            "ALERT",
+            f"{len(recent_hidden_claude)} launches",
+            f"Expected at most one hidden Claude launch within {HIDDEN_CLAUDE_COOLDOWN_SECONDS}s.",
+        )
+    else:
+        add_rule(
+            rule_results,
+            "hidden_claude_fallback_frequency",
+            "OK",
+            f"{len(recent_hidden_claude)} launches",
+            f"Expected at most one hidden Claude launch within {HIDDEN_CLAUDE_COOLDOWN_SECONDS}s.",
+        )
+
+    previous_session_stale_render = (
+        bool(status.get("using_cached_data"))
+        and cached_session_reset
+        and now > cached_session_reset
+        and (not last_success or last_success < cached_session_reset)
+    )
+    if previous_session_stale_render:
+        anomalies.append("ClaudeBat is rendering cached data from a previous session instead of hiding usage and recovering.")
+        add_rule(
+            rule_results,
+            "previous_session_cached_rendering",
+            "ALERT",
+            f"cached_reset={format_time(cached_session_reset)} last_success={format_time(last_success)}",
+            "Previous-session cached usage should be hidden until recovery succeeds.",
+        )
+    else:
+        add_rule(
+            rule_results,
+            "previous_session_cached_rendering",
+            "OK",
+            f"using_cached_data={status.get('using_cached_data')} cached_reset={format_time(cached_session_reset)}",
+            "No previous-session cached usage is currently being rendered.",
+        )
+
     status_label = "ALERT" if anomalies else "OK"
     print(f"STATUS: {status_label}")
     print("")
@@ -618,6 +801,15 @@ def main():
     print(f"- Cache age: {status.get('cache_age_seconds') if status else 'n/a'}s")
     print(f"- Session remaining: {status.get('session_remaining') if status else 'n/a'}")
     print(f"- Session resets at: {format_time_and_age(session_reset, now)}")
+    print(f"- Cached session reset at: {format_time_and_age(cached_session_reset, now)}")
+    print(f"- Last successful usage session reset at: {format_time_and_age(last_successful_usage_session_reset, now)}")
+    print(f"- Last successful auth refresh at: {format_time_and_age(last_successful_auth_refresh, now)}")
+    print(f"- Last successful auth refresh method: {last_successful_auth_refresh_method or 'n/a'}")
+    print(f"- Last token fingerprint changed at: {format_time_and_age(last_token_fingerprint_changed, now)}")
+    print(f"- Last recovery attempt at: {format_time_and_age(last_recovery_attempt, now)}")
+    print(f"- Last hidden Claude activation at: {format_time_and_age(last_hidden_claude_activation, now)}")
+    print(f"- Auth recovery phase: {auth_recovery_phase or 'n/a'}")
+    print(f"- Auth recovery result: {auth_recovery_result or 'n/a'}")
     print(f"- Last wake: {format_time_and_age(last_wake, now)}")
     print(f"- Status file: {status_path}")
     print(f"- Log directory: {logs_dir}")
@@ -634,7 +826,8 @@ def main():
         f"15m 401={len(records_within(records, 15 * 60, now, outcome='http_401'))}, "
         f"15m 429={len(records_within(records, 15 * 60, now, outcome='rate_limited'))}, "
         f"15m blocked={len(records_within(records, 15 * 60, now, action='blocked', category='fetch'))}, "
-        f"60m wake_starts={len(wake_fetch_starts)}"
+        f"60m wake_starts={len(wake_fetch_starts)}, "
+        f"20m hidden_claude={len(recent_hidden_claude)}"
     )
     print(f"- Rate-limit blocked-budget streaks in 30m: {recent_budget_streaks or []} (max={max_recent_budget_streak})")
     print("")
@@ -663,6 +856,11 @@ def main():
     last_network = latest_record(records, outcome="network_error")
     last_blocked = latest_record(records, action="blocked", category="fetch")
     last_stale_entered = latest_record(records, action="entered", category="stale_state")
+    last_previous_session = latest_record(records, action="previous_session_detected", category="auth")
+    last_recovery_started = latest_record(records, action="auth_recovery_started", category="auth")
+    last_native_refresh = latest_record(records, action="native_refresh_succeeded", category="auth")
+    last_claude_cli = latest_record(records, action="claude_cli_recovery_succeeded", category="auth")
+    last_manual_reconnect = latest_record(records, action="manual_reconnect_required", category="auth")
 
     print("Recent Markers:")
     print(f"- Last 401: {format_time_and_age(last_401.get('_timestamp'), now) if last_401 else 'n/a'}")
@@ -670,6 +868,11 @@ def main():
     print(f"- Last network error: {format_time_and_age(last_network.get('_timestamp'), now) if last_network else 'n/a'}")
     print(f"- Last blocked fetch: {format_time_and_age(last_blocked.get('_timestamp'), now) if last_blocked else 'n/a'}")
     print(f"- Last stale-state enter: {format_time_and_age(last_stale_entered.get('_timestamp'), now) if last_stale_entered else 'n/a'}")
+    print(f"- Last previous-session detect: {format_time_and_age(last_previous_session.get('_timestamp'), now) if last_previous_session else 'n/a'}")
+    print(f"- Last auth recovery start: {format_time_and_age(last_recovery_started.get('_timestamp'), now) if last_recovery_started else 'n/a'}")
+    print(f"- Last native refresh success: {format_time_and_age(last_native_refresh.get('_timestamp'), now) if last_native_refresh else 'n/a'}")
+    print(f"- Last hidden Claude success: {format_time_and_age(last_claude_cli.get('_timestamp'), now) if last_claude_cli else 'n/a'}")
+    print(f"- Last manual reconnect required: {format_time_and_age(last_manual_reconnect.get('_timestamp'), now) if last_manual_reconnect else 'n/a'}")
     print("")
 
     if recent_rate_limit_sequences:

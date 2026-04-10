@@ -61,9 +61,27 @@ final class MockAPI: UsageFetching, @unchecked Sendable {
     }
 }
 
-struct MockTokenProvider: TokenProvider {
-    var token: String?
-    func readToken() -> String? { token }
+final class MockTokenProvider: TokenProvider, @unchecked Sendable {
+    var snapshot: OAuthCredentialSnapshot?
+
+    init(token: String? = nil, snapshot: OAuthCredentialSnapshot? = nil) {
+        if let snapshot {
+            self.snapshot = snapshot
+        } else if let token {
+            self.snapshot = OAuthCredentialSnapshot(accessToken: token)
+        } else {
+            self.snapshot = nil
+        }
+    }
+
+    func readToken() -> String? { snapshot?.accessToken }
+    func readOAuthSnapshot() -> OAuthCredentialSnapshot? { snapshot }
+    @discardableResult
+    func writeOAuthSnapshot(_ snapshot: OAuthCredentialSnapshot) -> Bool {
+        self.snapshot = snapshot
+        return true
+    }
+    func tokenFingerprint() -> String? { snapshot?.fingerprint }
 }
 
 final class MockCache: UsageCaching, @unchecked Sendable {
@@ -124,4 +142,35 @@ actor MockMonitor: AppMonitoring {
             return true
         }.count
     }
+}
+
+final class MockRecoveryStore: RecoveryStatePersisting, @unchecked Sendable {
+    var snapshot: RecoverySnapshot?
+
+    func read() -> RecoverySnapshot? { snapshot }
+    func write(_ snapshot: RecoverySnapshot) { self.snapshot = snapshot }
+}
+
+struct MockAuthRefresher: AuthRefreshing {
+    var result: OAuthRefreshResult
+    func refreshCredentials(currentSnapshot: OAuthCredentialSnapshot) async -> OAuthRefreshResult {
+        result
+    }
+}
+
+struct MockClaudeCLIRecoverer: ClaudeCLIRecovering {
+    var result: ClaudeCLIRecoveryResult
+    func recoverAuth(
+        baselineFingerprint: String?,
+        baselineExpiresAt: Int64?,
+        tokenProvider: any TokenProvider,
+        timeout: TimeInterval
+    ) async -> ClaudeCLIRecoveryResult {
+        result
+    }
+}
+
+struct MockReachability: NetworkReachabilityChecking {
+    var reachable: Bool = true
+    func isReachable() -> Bool { reachable }
 }

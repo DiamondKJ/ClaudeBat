@@ -38,4 +38,23 @@ struct UsageModelsTests {
         let result = period.timeUntilReset
         #expect(result.hasPrefix("Resets in 1h"))
     }
+
+    @Test func decodesNullableFiveHourReset() throws {
+        let payload = """
+        {
+          "five_hour": { "utilization": 0.0, "resets_at": null },
+          "seven_day": { "utilization": 76.0, "resets_at": "2026-04-12T19:00:00.351655+00:00" },
+          "seven_day_sonnet": { "utilization": 23.0, "resets_at": "2026-04-13T09:00:00.351668+00:00" },
+          "seven_day_opus": null,
+          "extra_usage": { "is_enabled": true, "monthly_limit": 3750, "used_credits": 0.0, "utilization": null }
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(UsageResponse.self, from: Data(payload.utf8))
+
+        #expect(decoded.fiveHour.resetsAt == nil)
+        #expect(decoded.fiveHour.resetsAtDate == nil)
+        #expect(decoded.fiveHour.remainingInt == 100)
+        #expect(decoded.sevenDay.resetsAtDate != nil)
+    }
 }

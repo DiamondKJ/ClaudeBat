@@ -31,9 +31,9 @@ public struct UsageResponse: Codable {
 public struct UsagePeriod: Codable {
     /// Percentage USED (0-100)
     public let utilization: Double
-    public let resetsAt: String
+    public let resetsAt: String?
 
-    public init(utilization: Double, resetsAt: String) {
+    public init(utilization: Double, resetsAt: String?) {
         self.utilization = utilization
         self.resetsAt = resetsAt
     }
@@ -55,6 +55,7 @@ public struct UsagePeriod: Codable {
 
     /// Parse the ISO 8601 reset time
     public var resetsAtDate: Date? {
+        guard let resetsAt else { return nil }
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.date(from: resetsAt) ?? ISO8601DateFormatter().date(from: resetsAt)
