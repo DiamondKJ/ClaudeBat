@@ -53,8 +53,8 @@ struct LoadingRetroView: View {
                 )
 
                 Text("\(filledSegments * 5)")
-                    .font(CBFont.modelNumber)
-                    .foregroundStyle(CBColor.textSecondary)
+                    .font(CBFont.pixelFont(size: 10))
+                    .foregroundStyle(CBColor.textMuted)
             }
 
             Spacer().frame(height: 32)

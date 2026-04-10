@@ -95,13 +95,13 @@ struct NormalUsageView: View {
                     HStack {
                         Text("EXTRA USAGE")
                             .font(CBFont.sectionHeader)
-                            .foregroundStyle(CBColor.textSecondary)
+                            .foregroundStyle(CBColor.textMuted)
                             .tracking(0.6)
 
                         Spacer()
 
                         Text("Enabled")
-                            .font(CBFont.smallLabel)
+                            .font(CBFont.tinyLabel)
                             .foregroundStyle(CBColor.accent)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
@@ -115,7 +115,7 @@ struct NormalUsageView: View {
                         ? "\(extra.usedFormatted) / \(extra.limitFormatted) this month"
                         : "\(extra.usedFormatted) this month"
                     Text(spendText)
-                        .font(CBFont.smallLabel)
+                        .font(CBFont.modelLabel)
                         .foregroundStyle(CBColor.textMuted)
                 }
             }

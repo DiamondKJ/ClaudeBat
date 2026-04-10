@@ -9,9 +9,9 @@ struct ModelBreakdownRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Text(isMaxed ? "" : "\(Int(remaining.rounded()))")
-                .font(CBFont.modelNumber)
-                .foregroundStyle(CBColor.textPrimary)
+            Text(label)
+                .font(CBFont.modelLabel)
+                .foregroundStyle(isMaxed ? CBColor.batteryCritical : CBColor.textPrimary)
                 .frame(width: 50, alignment: .leading)
 
             SegmentedBatteryBar(
@@ -20,10 +20,9 @@ struct ModelBreakdownRow: View {
                 fillColor: isMaxed ? CBColor.batteryCritical : CBColor.accent
             )
 
-            Text(label)
-                .font(CBFont.modelLabel)
+            Text(isMaxed ? "" : "\(Int(remaining.rounded()))")
+                .font(CBFont.modelNumber)
                 .foregroundStyle(isMaxed ? CBColor.batteryCritical : CBColor.textPrimary)
-                .fixedSize()
                 .frame(width: 50, alignment: .trailing)
         }
     }
