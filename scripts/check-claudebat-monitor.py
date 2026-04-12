@@ -14,6 +14,7 @@ REPEATED_401_THRESHOLD = 2
 REPEATED_429_WINDOW_SECONDS = 30 * 60
 REPEATED_429_THRESHOLD = 2
 WAKE_REFRESH_WINDOW_SECONDS = 2 * 60
+WAKE_COALESCE_WINDOW_SECONDS = 5
 DUPLICATE_WAKE_FETCH_WINDOW_SECONDS = 5
 CACHED_DATA_THRESHOLD_SECONDS = 10 * 60
 RESET_REFRESH_WINDOW_SECONDS = 2 * 60
@@ -542,7 +543,37 @@ def main():
             and record.get("_timestamp")
             and last_wake <= record["_timestamp"] <= last_wake + dt.timedelta(seconds=WAKE_REFRESH_WINDOW_SECONDS)
         ]
-        if not wake_success:
+        wake_coalesced = next(
+            (
+                record
+                for record in reversed(records)
+                if record.get("_timestamp")
+                and last_wake_record
+                and record.get("event_category") == "lifecycle"
+                and record.get("action") == "wake_coalesced"
+                and abs((record["_timestamp"] - last_wake_record["_timestamp"]).total_seconds()) <= WAKE_COALESCE_WINDOW_SECONDS
+            ),
+            None,
+        )
+        pre_wake_success = next(
+            (
+                record
+                for record in reversed(records)
+                if record.get("outcome") == "success"
+                and record.get("_timestamp")
+                and last_wake - dt.timedelta(seconds=WAKE_COALESCE_WINDOW_SECONDS) <= record["_timestamp"] <= last_wake
+            ),
+            None,
+        )
+        if not wake_success and wake_coalesced and pre_wake_success:
+            add_rule(
+                rule_results,
+                "wake_refresh_completion",
+                "OK",
+                format_time_and_age(last_wake, now),
+                "Latest wake was coalesced and a successful refresh already completed within the wake coalescing window.",
+            )
+        elif not wake_success:
             if last_success and last_success > last_wake + dt.timedelta(seconds=WAKE_REFRESH_WINDOW_SECONDS):
                 warnings.append(
                     "A wake event missed the 2-minute refresh target, but the app recovered later in the same wake cycle."
@@ -660,7 +691,7 @@ def main():
 
     if latest_previous_session:
         previous_detected_at = latest_previous_session.get("_timestamp")
-        followup = next(
+        auth_followup = next(
             (
                 record for record in records
                 if record.get("_timestamp")
@@ -671,22 +702,42 @@ def main():
             ),
             None,
         )
-        if followup:
+        success_followup = next(
+            (
+                record for record in records
+                if record.get("_timestamp")
+                and previous_detected_at
+                and previous_detected_at <= record["_timestamp"] <= previous_detected_at + dt.timedelta(seconds=RESET_REFRESH_WINDOW_SECONDS)
+                and record.get("event_category") == "fetch"
+                and record.get("action") == "completed"
+                and record.get("outcome") == "success"
+            ),
+            None,
+        )
+        if auth_followup:
             add_rule(
                 rule_results,
                 "previous_session_recovery_attempted",
                 "OK",
                 format_time_and_age(previous_detected_at, now),
-                f"Followed by auth action {followup.get('action')} at {format_time(followup.get('_timestamp'))}.",
+                f"Followed by auth action {auth_followup.get('action')} at {format_time(auth_followup.get('_timestamp'))}.",
+            )
+        elif success_followup:
+            add_rule(
+                rule_results,
+                "previous_session_recovery_attempted",
+                "OK",
+                format_time_and_age(previous_detected_at, now),
+                f"Followed by successful usage fetch at {format_time(success_followup.get('_timestamp'))}.",
             )
         else:
-            anomalies.append("A previous-session cache was detected but no auth recovery or reconnect path was started.")
+            anomalies.append("A previous-session cache was detected but neither a successful usage fetch nor auth recovery/reconnect followed.")
             add_rule(
                 rule_results,
                 "previous_session_recovery_attempted",
                 "ALERT",
                 format_time_and_age(previous_detected_at, now),
-                "Expected auth recovery or reconnect handling immediately after previous_session_detected.",
+                "Expected either a successful usage fetch or auth recovery/reconnect handling after previous_session_detected.",
             )
     else:
         add_rule(

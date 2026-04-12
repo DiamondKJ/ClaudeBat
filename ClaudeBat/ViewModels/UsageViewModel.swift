@@ -130,12 +130,8 @@ public final class UsageViewModel {
         return lastSuccessAt >= resetAt
     }
 
-    private var needsSessionAwareRecovery: Bool {
+    private var needsFreshSessionUsage: Bool {
         usage != nil && !cachedUsageBelongsToCurrentSession
-    }
-
-    private var shouldPreemptivelyRefreshAuth: Bool {
-        needsSessionAwareRecovery && hasRefreshableCredentials
     }
 
     private var isRecoveringAuth: Bool {
@@ -336,7 +332,7 @@ public final class UsageViewModel {
             return .showOffline
         }
 
-        if shouldPreemptivelyRefreshAuth {
+        if needsFreshSessionUsage {
             recordMonitorEvent(
                 MonitorEvent(
                     category: .auth,
@@ -345,11 +341,7 @@ public final class UsageViewModel {
                     message: "cached usage belongs to a previous session"
                 )
             )
-            return .refreshAuthThenFetch
-        }
-
-        if sessionDataNeedsRefresh {
-            return hasRefreshableCredentials ? .refreshAuthThenFetch : .showReconnect
+            return .fetchUsageNormally
         }
 
         if lastFailureReason == FetchOutcome.http401.rawValue || cachedDataReason == .authInvalid {
@@ -763,6 +755,8 @@ public final class UsageViewModel {
             usage = response
             fetchedAt = successAt
             lastSuccessAt = successAt
+            lastFailureAt = nil
+            lastFailureReason = nil
             lastHTTPStatus = 200
             lastRetryAfterSeconds = nil
             freshness = .fresh
@@ -880,6 +874,8 @@ public final class UsageViewModel {
         displaySleeping = false
         lastWakeAt = now
         lastWakeSource = source
+        let dataAge = fetchedAt.map { Date().timeIntervalSince($0) } ?? .infinity
+        let trigger: FetchTrigger = source == .screen ? .screenWake : .machineWake
 
         recordMonitorEvent(
             MonitorEvent(
@@ -899,6 +895,22 @@ public final class UsageViewModel {
                     message: "duplicate wake notification ignored"
                 )
             )
+            if pollingTimer?.isValid != true {
+                restartPolling(reason: "\(source.rawValue)_wake_rearmed")
+                recordMonitorEvent(
+                    MonitorEvent(
+                        category: .lifecycle,
+                        action: "wake_rearmed",
+                        wakeSource: source,
+                        message: "coalesced wake restarted polling after timer was inactive"
+                    )
+                )
+                if dataAge > 300 {
+                    Task { @MainActor in
+                        await self.fetchIfBudgetAllows(trigger: trigger)
+                    }
+                }
+            }
             return
         }
 
@@ -907,8 +919,6 @@ public final class UsageViewModel {
         wakeAuthRetryPending = false
 
         restartPolling(reason: "\(source.rawValue)_wake")
-        let dataAge = fetchedAt.map { Date().timeIntervalSince($0) } ?? .infinity
-        let trigger: FetchTrigger = source == .screen ? .screenWake : .machineWake
         if dataAge > 300 {
             Task { @MainActor in
                 let serverBlocked = await self.budget.isServerCooldownActive()
@@ -939,7 +949,7 @@ public final class UsageViewModel {
         }
     }
 
-    private func handleSleep() {
+    func handleSleep() {
         displaySleeping = true
         pollingTimer?.invalidate()
         clearWakeRecoveryState()
