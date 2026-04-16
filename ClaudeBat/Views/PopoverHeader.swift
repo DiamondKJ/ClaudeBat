@@ -5,31 +5,29 @@ import SwiftUI
 struct PopoverHeader: View {
     var onClose: (() -> Void)? = nil
 
-    @State private var expression: BatExpression = .default
-    @State private var expressionIndex = 0
-
     private let expressions: [BatExpression] = [.default, .winking, .cheeky, .sleeping]
 
     var body: some View {
-        HStack {
-            HStack(spacing: 8) {
-                PixelBatView(expression: expression, pixelSize: 1.5, color: CBColor.accent)
-                Text("ClaudeBat")
-                    .font(CBFont.pixelFont(size: 14))
-                    .foregroundStyle(CBColor.accent)
-            }
+        TimelineView(.periodic(from: .now, by: 2.0)) { context in
+            HStack {
+                HStack(spacing: 8) {
+                    PixelBatView(expression: expression(at: context.date), pixelSize: 1.5, color: CBColor.accent)
+                    Text("ClaudeBat")
+                        .font(CBFont.pixelFont(size: 14))
+                        .foregroundStyle(CBColor.accent)
+                }
 
-            Spacer()
+                Spacer()
 
-            if let onClose {
-                PixelCloseButton(action: onClose)
+                if let onClose {
+                    PixelCloseButton(action: onClose)
+                }
             }
         }
-        .onAppear {
-            Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
-                expressionIndex = (expressionIndex + 1) % expressions.count
-                expression = expressions[expressionIndex]
-            }
-        }
+    }
+
+    private func expression(at date: Date) -> BatExpression {
+        let index = Int(date.timeIntervalSinceReferenceDate / 2.0) % expressions.count
+        return expressions[index]
     }
 }

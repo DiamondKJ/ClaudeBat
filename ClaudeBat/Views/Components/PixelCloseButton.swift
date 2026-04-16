@@ -27,8 +27,11 @@ struct PixelCloseButton: View {
                 }
             }
             .frame(width: 20, height: 20)
+            .padding(4)
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())
+        .accessibilityLabel("Close ClaudeBat popover")
+        .accessibilityHint("Dismisses the usage popover")
     }
 }

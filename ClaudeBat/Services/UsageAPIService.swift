@@ -4,24 +4,27 @@ public enum UsageAPIError: Error, LocalizedError {
     case noToken
     case networkError(Error)
     case rateLimited(retryAfter: TimeInterval?)
-    case httpError(Int, String)
-    case decodingError(Error, String)
+    case httpError(Int)
+    case decodingError
 
     public var errorDescription: String? {
         switch self {
         case .noToken: return "No auth token found"
-        case .networkError(let e): return "Network error: \(e.localizedDescription)"
+        case .networkError: return "Network error"
         case .rateLimited: return "Rate limited"
-        case .httpError(let code, let body): return "HTTP \(code): \(body)"
-        case .decodingError(let e, _): return "Decode error: \(e.localizedDescription)"
+        case .httpError(let code): return "HTTP \(code)"
+        case .decodingError: return "Unexpected API response"
         }
     }
 }
 
 public struct UsageAPIService: UsageFetching {
     private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+    private let session: URLSession
 
-    public init() {}
+    public init(session: URLSession = .shared) {
+        self.session = session
+    }
 
     public func fetchUsage(token: String) async throws -> UsageResponse {
         var request = URLRequest(url: Self.usageURL)
@@ -35,7 +38,7 @@ public struct UsageAPIService: UsageFetching {
 
         let (data, response): (Data, URLResponse)
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await session.data(for: request)
         } catch {
             throw UsageAPIError.networkError(error)
         }
@@ -46,20 +49,32 @@ public struct UsageAPIService: UsageFetching {
 
         if httpResponse.statusCode == 429 {
             let retryAfter = httpResponse.value(forHTTPHeaderField: "Retry-After")
-                .flatMap { TimeInterval($0) }
+                .flatMap(Self.parseRetryAfter)
             throw UsageAPIError.rateLimited(retryAfter: retryAfter)
         }
 
         guard httpResponse.statusCode == 200 else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw UsageAPIError.httpError(httpResponse.statusCode, String(body.prefix(200)))
+            throw UsageAPIError.httpError(httpResponse.statusCode)
         }
 
         do {
             return try JSONDecoder().decode(UsageResponse.self, from: data)
         } catch {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw UsageAPIError.decodingError(error, String(body.prefix(500)))
+            throw UsageAPIError.decodingError
         }
+    }
+
+    private static func parseRetryAfter(_ value: String) -> TimeInterval? {
+        if let seconds = TimeInterval(value) {
+            return seconds
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE',' dd MMM yyyy HH':'mm':'ss z"
+
+        guard let retryDate = formatter.date(from: value) else { return nil }
+        return max(0, retryDate.timeIntervalSinceNow)
     }
 }

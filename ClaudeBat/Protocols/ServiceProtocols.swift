@@ -1,5 +1,17 @@
 import Foundation
 
+public enum BudgetReservationDecision: Equatable, Sendable {
+    case granted
+    case blockedByLocalWindow
+    case blockedByServerCooldown
+}
+
+public enum NetworkReachabilityStatus: Equatable, Sendable {
+    case unknown
+    case reachable
+    case unreachable
+}
+
 public protocol TokenProvider {
     func readToken() -> String?
     func readOAuthSnapshot() -> OAuthCredentialSnapshot?
@@ -13,8 +25,7 @@ public protocol UsageFetching {
 }
 
 public protocol BudgetTracking: Actor {
-    func canRequest() -> Bool
-    func recordRequest()
+    func reserveRequest(allowWindowBypass: Bool) -> BudgetReservationDecision
     func setRetryAfter(seconds: TimeInterval)
     func isServerCooldownActive() -> Bool
     func clearServerCooldown()
@@ -51,7 +62,7 @@ public protocol ClaudeCLIRecovering {
 }
 
 public protocol NetworkReachabilityChecking {
-    func isReachable() -> Bool
+    func currentStatus() -> NetworkReachabilityStatus
 }
 
 public extension TokenProvider {

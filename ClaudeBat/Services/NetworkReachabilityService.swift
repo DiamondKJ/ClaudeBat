@@ -5,14 +5,14 @@ public final class NetworkReachabilityService: NetworkReachabilityChecking, @unc
     private let monitor: NWPathMonitor
     private let queue = DispatchQueue(label: "claudebat.reachability")
     private let lock = NSLock()
-    private var currentStatus: NWPath.Status = .satisfied
+    private var status: NetworkReachabilityStatus = .unknown
 
     public init() {
         monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
             guard let self else { return }
             self.lock.lock()
-            self.currentStatus = path.status
+            self.status = path.status == .satisfied ? .reachable : .unreachable
             self.lock.unlock()
         }
         monitor.start(queue: queue)
@@ -22,9 +22,9 @@ public final class NetworkReachabilityService: NetworkReachabilityChecking, @unc
         monitor.cancel()
     }
 
-    public func isReachable() -> Bool {
+    public func currentStatus() -> NetworkReachabilityStatus {
         lock.lock()
         defer { lock.unlock() }
-        return currentStatus == .satisfied
+        return status
     }
 }

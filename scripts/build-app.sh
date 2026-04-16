@@ -16,6 +16,7 @@ APP_NAME="ClaudeBat"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 BUNDLE_ID="com.diamondkj.claudebat"
 VERSION="${VERSION_OVERRIDE:-$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "1.0.0")}"
+BUILD_NUMBER="${BUILD_NUMBER_OVERRIDE:-$(git rev-list --count HEAD 2>/dev/null || echo "1")}"
 BUILD_FLAVOR="standard"
 if [[ "${LOCAL_MONITOR_BUILD:-0}" == "1" ]]; then
     BUILD_FLAVOR="local-monitor"
@@ -23,6 +24,7 @@ fi
 GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo "unknown")"
 
 echo "=== Building $APP_NAME v$VERSION ==="
+echo "Build number: $BUILD_NUMBER"
 echo "Flavor: $BUILD_FLAVOR"
 echo "Git commit: $GIT_COMMIT"
 
@@ -86,7 +88,7 @@ cat > "$CONTENTS/Info.plist" << PLIST
 	<key>CFBundleShortVersionString</key>
 	<string>$VERSION</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$BUILD_NUMBER</string>
 	<key>CBBuildFlavor</key>
 	<string>$BUILD_FLAVOR</string>
 	<key>CBGitCommit</key>

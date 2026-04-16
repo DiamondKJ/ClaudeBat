@@ -91,6 +91,7 @@ enum CBSpacing {
     static let popupPadding: CGFloat = 20
     static let popupWidth: CGFloat = 320
     static let popupHeight: CGFloat = 392
+    static let popupHeightWithBanner: CGFloat = 472
 }
 
 // MARK: - Corner Radius

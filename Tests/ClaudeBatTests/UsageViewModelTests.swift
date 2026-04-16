@@ -114,7 +114,7 @@ struct FetchPipelineTests {
 
         await vm.fetchIfBudgetAllows()
 
-        #expect(vm.errorMessage != nil)
+        #expect(vm.errorMessage == "ClaudeBat could not reach the usage endpoint. Check your internet connection.")
         #expect(vm.usage == nil)
     }
 
@@ -322,7 +322,7 @@ struct UsageViewModelMonitoringTests {
     @MainActor
     @Test func http401_withCache_marksAuthInvalidAndRecordsMonitorState() async {
         let api = MockAPI()
-        api.error = UsageAPIError.httpError(401, "unauthorized")
+        api.error = UsageAPIError.httpError(401)
         let cache = MockCache()
         cache.stored = Timestamped(value: .fixture(), fetchedAt: Date())
         let monitor = MockMonitor()
@@ -338,6 +338,7 @@ struct UsageViewModelMonitoringTests {
         )
 
         await vm.fetchIfBudgetAllows(trigger: .pollTimer)
+        try? await Task.sleep(nanoseconds: 50_000_000)
 
         #expect(vm.cachedDataReason == .authInvalid)
         #expect(await monitor.containsEvent(category: .auth, action: "invalid_auth", outcome: .http401))
@@ -364,9 +365,12 @@ struct UsageViewModelMonitoringTests {
         )
 
         await vm.fetchIfBudgetAllows(trigger: .pollTimer)
+        try? await Task.sleep(nanoseconds: 50_000_000)
 
         #expect(vm.cachedDataReason == .networkError)
         #expect(await monitor.containsEvent(category: .staleState, action: "entered"))
+        let record = await monitor.latestRecord()
+        #expect(record?.event.message == "usage request failed due to connectivity")
         let status = await monitor.latestStatus()
         #expect(status?.staleReason == .networkError)
         #expect(status?.usingCachedData == true)
@@ -475,10 +479,7 @@ struct UsageViewModelMonitoringTests {
     @MainActor
     @Test func decodingError_withCache_usesShortRetryAndMarksServerStale() async {
         let api = MockAPI()
-        api.error = UsageAPIError.decodingError(
-            DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "bad payload")),
-            "{\"seven_day\":null}"
-        )
+        api.error = UsageAPIError.decodingError
         let cache = MockCache()
         cache.stored = Timestamped(value: .fixture(), fetchedAt: Date())
         let monitor = MockMonitor()
@@ -505,11 +506,8 @@ struct UsageViewModelMonitoringTests {
     @Test func authRecovery_decodeFailureDoesNotCountAsRecoverySuccess() async {
         let api = MockAPI()
         api.queuedResults = [
-            .failure(UsageAPIError.httpError(401, "unauthorized")),
-            .failure(UsageAPIError.decodingError(
-                DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "bad payload")),
-                "{\"five_hour\":{\"utilization\":0,\"resets_at\":null}}"
-            ))
+            .failure(UsageAPIError.httpError(401)),
+            .failure(UsageAPIError.decodingError)
         ]
         let cache = MockCache()
         cache.stored = Timestamped(value: .fixture(), fetchedAt: Date().addingTimeInterval(-3600))
@@ -526,7 +524,7 @@ struct UsageViewModelMonitoringTests {
             recoveryStore: MockRecoveryStore(),
             monitor: monitor,
             authRefresher: MockAuthRefresher(result: .success(newFingerprint: "new-fp")),
-            reachability: MockReachability(reachable: true),
+            reachability: MockReachability(status: .reachable),
             startImmediately: false
         )
 
@@ -540,10 +538,111 @@ struct UsageViewModelMonitoringTests {
     }
 
     @MainActor
+    @Test func missingRefreshToken_fallsBackToClaudeCLIRecovery() async {
+        let api = MockAPI()
+        api.queuedResults = [
+            .failure(UsageAPIError.httpError(401)),
+            .success(.fixture())
+        ]
+        let cache = MockCache()
+        cache.stored = Timestamped(value: .fixture(), fetchedAt: Date().addingTimeInterval(-3600))
+        let monitor = MockMonitor()
+        let tokenProvider = MockTokenProvider(
+            snapshot: OAuthCredentialSnapshot(accessToken: "tok")
+        )
+
+        let vm = UsageViewModel(
+            tokenProvider: tokenProvider,
+            api: api,
+            budget: MockBudget(),
+            cache: cache,
+            recoveryStore: MockRecoveryStore(),
+            monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .success),
+            reachability: MockReachability(status: .reachable),
+            startImmediately: false
+        )
+
+        await vm.fetchIfBudgetAllows(trigger: .pollTimer)
+        try? await Task.sleep(nanoseconds: 150_000_000)
+
+        #expect(api.fetchCount == 2)
+        #expect(await monitor.containsEvent(category: .auth, action: "native_refresh_failed"))
+        #expect(await monitor.containsEvent(category: .auth, action: "claude_cli_recovery_started"))
+        #expect(await monitor.containsEvent(category: .auth, action: "claude_cli_recovery_succeeded"))
+        #expect(await monitor.containsEvent(category: .auth, action: "auth_recovery_succeeded"))
+        #expect(await monitor.containsEvent(category: .auth, action: "manual_reconnect_required") == false)
+        #expect(vm.cachedDataReason == nil)
+        #expect(vm.popoverScreen == .usage)
+    }
+
+    @MainActor
+    @Test func failedRecovery_restartsPolling() async {
+        let api = MockAPI()
+        api.error = UsageAPIError.httpError(401)
+        let cache = MockCache()
+        cache.stored = Timestamped(value: .expiredFixture(), fetchedAt: Date().addingTimeInterval(-3600))
+        let monitor = MockMonitor()
+
+        let vm = UsageViewModel(
+            tokenProvider: MockTokenProvider(token: "tok"),
+            api: api,
+            budget: MockBudget(),
+            cache: cache,
+            recoveryStore: MockRecoveryStore(),
+            monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(status: .reachable),
+            startImmediately: false
+        )
+
+        await vm.fetchIfBudgetAllows(trigger: .pollTimer)
+        try? await Task.sleep(nanoseconds: 150_000_000)
+
+        let latestRecord = await monitor.latestRecord()
+        #expect(latestRecord?.event.category == .timer)
+        #expect(latestRecord?.event.action == "restarted")
+        #expect(latestRecord?.event.message == "auth_recovery_failed")
+        #expect(vm.popoverScreen == .reconnectClaude)
+    }
+
+    @MainActor
+    @Test func successfulFetch_clearsPreviousRecoveryFailureState() async {
+        let api = MockAPI()
+        api.response = .fixture()
+        let monitor = MockMonitor()
+        let recoveryStore = MockRecoveryStore()
+        recoveryStore.snapshot = RecoverySnapshot(
+            lastRecoveryAttemptAt: Date().addingTimeInterval(-120),
+            lastRecoveryResult: .timedOut,
+            authRecoveryPhase: .failedRequiresReconnect
+        )
+
+        let vm = UsageViewModel(
+            tokenProvider: MockTokenProvider(token: "tok"),
+            api: api,
+            budget: MockBudget(),
+            cache: MockCache(),
+            recoveryStore: recoveryStore,
+            monitor: monitor,
+            startImmediately: false
+        )
+
+        await vm.fetchIfBudgetAllows(trigger: .pollTimer)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        let status = await monitor.latestStatus()
+        #expect(status?.authRecoveryPhase == .idle)
+        #expect(status?.authRecoveryResult == nil)
+    }
+
+    @MainActor
     @Test func successfulRecoveryClears401StateForLaterPolls() async {
         let api = MockAPI()
         api.queuedResults = [
-            .failure(UsageAPIError.httpError(401, "unauthorized")),
+            .failure(UsageAPIError.httpError(401)),
             .success(.fixture()),
             .success(.fixture())
         ]
@@ -562,7 +661,7 @@ struct UsageViewModelMonitoringTests {
             recoveryStore: MockRecoveryStore(),
             monitor: monitor,
             authRefresher: MockAuthRefresher(result: .success(newFingerprint: "new-fp")),
-            reachability: MockReachability(reachable: true),
+            reachability: MockReachability(status: .reachable),
             startImmediately: false
         )
 
@@ -658,10 +757,10 @@ struct UsageViewModelMonitoringTests {
     }
 
     @MainActor
-    @Test func firstWake401_usesNativeRefreshBeforeReconnect() async {
+    @Test func firstWake401_schedulesWakeRetryBeforeAuthRecovery() async {
         let api = MockAPI()
         api.queuedResults = [
-            .failure(UsageAPIError.httpError(401, "unauthorized")),
+            .failure(UsageAPIError.httpError(401)),
             .success(.fixture())
         ]
         let cache = MockCache()
@@ -685,8 +784,8 @@ struct UsageViewModelMonitoringTests {
             monitor: monitor,
             authRefresher: MockAuthRefresher(result: .success(newFingerprint: "new-fp")),
             claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .success),
-            reachability: MockReachability(reachable: true),
-            wakeAuthRetryInterval: 1,
+            reachability: MockReachability(status: .reachable),
+            wakeAuthRetryInterval: 0.05,
             startImmediately: false
         )
 
@@ -695,11 +794,8 @@ struct UsageViewModelMonitoringTests {
 
         #expect(api.fetchCount == 2)
         #expect(vm.cachedDataReason == nil)
-        #expect(await monitor.containsEvent(category: .auth, action: "native_refresh_started"))
-        #expect(await monitor.containsEvent(category: .auth, action: "native_refresh_succeeded"))
-
-        try? await Task.sleep(nanoseconds: 100_000_000)
-
+        #expect(await monitor.containsEvent(category: .auth, action: "wake_auth_retry_scheduled"))
+        #expect(await monitor.containsEvent(category: .auth, action: "native_refresh_started") == false)
         #expect(vm.popoverScreen == .usage)
         #expect(vm.shouldShowMenuBarUsage == true)
     }
@@ -721,7 +817,43 @@ struct UsageViewModelMonitoringTests {
         try? await Task.sleep(nanoseconds: 50_000_000)
 
         let status = await monitor.latestStatus()
-        #expect(status?.currentPollIntervalSeconds == 120)
+        #expect(status?.currentPollIntervalSeconds == 65)
+    }
+
+    @MainActor
+    @Test func unreachableSessionClassifier_routesOfflineImmediately() async {
+        let vm = UsageViewModel(
+            tokenProvider: MockTokenProvider(token: "tok"),
+            api: MockAPI(),
+            budget: MockBudget(),
+            cache: MockCache(),
+            reachability: MockReachability(status: .unreachable),
+            startImmediately: false
+        )
+
+        await vm.fetchIfBudgetAllows(trigger: .appLaunch)
+
+        #expect(vm.popoverScreen == .offline)
+    }
+
+    @MainActor
+    @Test func unknownReachability_allowsFetchAttempt() async {
+        let api = MockAPI()
+        api.response = .fixture()
+
+        let vm = UsageViewModel(
+            tokenProvider: MockTokenProvider(token: "tok"),
+            api: api,
+            budget: MockBudget(),
+            cache: MockCache(),
+            reachability: MockReachability(status: .unknown),
+            startImmediately: false
+        )
+
+        await vm.fetchIfBudgetAllows(trigger: .appLaunch)
+
+        #expect(api.fetchCount == 1)
+        #expect(vm.popoverScreen == .usage)
     }
 }
 
@@ -780,7 +912,7 @@ struct UsageViewModelPopoverRoutingTests {
     @MainActor
     @Test func expiredCachedSession_authFailureRoutesToReconnect() async {
         let api = MockAPI()
-        api.error = UsageAPIError.httpError(401, "unauthorized")
+        api.error = UsageAPIError.httpError(401)
         let cache = MockCache()
         cache.stored = Timestamped(value: .expiredFixture(), fetchedAt: Date().addingTimeInterval(-3600))
 
@@ -790,6 +922,8 @@ struct UsageViewModelPopoverRoutingTests {
             budget: MockBudget(),
             cache: cache,
             recoveryStore: MockRecoveryStore(),
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
             startImmediately: false
         )
 
@@ -822,7 +956,7 @@ struct UsageViewModelPopoverRoutingTests {
             cache: cache,
             recoveryStore: MockRecoveryStore(),
             authRefresher: MockAuthRefresher(result: .success(newFingerprint: "new-fp")),
-            reachability: MockReachability(reachable: true),
+            reachability: MockReachability(status: .reachable),
             startImmediately: false
         )
 
@@ -854,7 +988,7 @@ struct UsageViewModelPopoverRoutingTests {
             cache: cache,
             recoveryStore: MockRecoveryStore(),
             authRefresher: MockAuthRefresher(result: .success(newFingerprint: "new-fp")),
-            reachability: MockReachability(reachable: true),
+            reachability: MockReachability(status: .reachable),
             startImmediately: false
         )
 

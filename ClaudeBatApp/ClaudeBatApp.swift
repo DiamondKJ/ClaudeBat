@@ -16,7 +16,14 @@ struct ClaudeBatApp: App {
 
 // MARK: - App Delegate
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+    private enum PopoverLayout {
+        static let width: CGFloat = 320
+        static let baseHeight: CGFloat = 392
+        static let bannerHeight: CGFloat = 472
+    }
+
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var contextPopover: NSPopover!
@@ -38,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        viewModel.shutdown()
         viewModel.recordAppTermination()
     }
 
@@ -72,13 +80,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupPopover() {
         popover = NSPopover()
-        popover.contentSize = NSSize(width: 320, height: 392)
+        popover.contentSize = NSSize(width: PopoverLayout.width, height: PopoverLayout.baseHeight)
         popover.behavior = .transient
         popover.animates = true
+        popover.delegate = self
         popover.contentViewController = NSHostingController(
-            rootView: UsagePopoverView(viewModel: viewModel)
+            rootView: UsagePopoverView(
+                viewModel: viewModel,
+                onPreferredHeightChange: { [weak self] height in
+                    self?.updatePopoverSize(height: height)
+                }
+            )
         )
         popover.appearance = NSAppearance(named: .darkAqua)
+    }
+
+    private func updatePopoverSize(height: CGFloat) {
+        let targetSize = NSSize(width: PopoverLayout.width, height: height)
+        popover.contentSize = targetSize
+        popover.contentViewController?.preferredContentSize = targetSize
     }
 
     // MARK: - Context Menu Popover
@@ -135,6 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             contextPopover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
         } else {
             closeAllPopovers()
+            updatePopoverSize(height: viewModel.shouldShowCachedBanner ? PopoverLayout.bannerHeight : PopoverLayout.baseHeight)
             popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
         }
     }
@@ -142,6 +163,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func closeAllPopovers() {
         if popover.isShown { popover.performClose(nil) }
         if contextPopover.isShown { contextPopover.performClose(nil) }
+    }
+
+    // MARK: - NSPopoverDelegate
+
+    func popoverWillShow(_ notification: Notification) {
+        guard notification.object as? NSPopover === popover else { return }
+        viewModel.onPopoverOpen()
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        guard notification.object as? NSPopover === popover else { return }
+        viewModel.onPopoverClose()
     }
 
     private func toggleLaunchAtLogin() {

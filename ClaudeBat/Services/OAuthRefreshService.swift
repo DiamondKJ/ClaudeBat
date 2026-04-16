@@ -17,8 +17,6 @@ public struct OAuthRefreshService: AuthRefreshing {
 
     private static let tokenURL = URL(string: "https://platform.claude.com/v1/oauth/token")!
     private static let clientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-    private static let defaultScopes = ["user:profile", "user:inference", "user:sessions:claude_code", "user:mcp_servers", "user:file_upload"]
-
     private let tokenProvider: any TokenProvider
     private let session: URLSession
 
@@ -40,18 +38,19 @@ public struct OAuthRefreshService: AuthRefreshing {
         request.timeoutInterval = 15
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let scope = currentSnapshot.scopes.isEmpty ? Self.defaultScopes.joined(separator: " ") : currentSnapshot.scopes.joined(separator: " ")
-        let body: [String: String] = [
+        var body: [String: String] = [
             "grant_type": "refresh_token",
             "refresh_token": refreshToken,
             "client_id": Self.clientID,
-            "scope": scope,
         ]
+        if !currentSnapshot.scopes.isEmpty {
+            body["scope"] = currentSnapshot.scopes.joined(separator: " ")
+        }
 
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         } catch {
-            return .unexpectedFailure(error.localizedDescription)
+            return .unexpectedFailure("refresh request encoding failed")
         }
 
         let data: Data
@@ -59,26 +58,25 @@ public struct OAuthRefreshService: AuthRefreshing {
         do {
             (data, response) = try await session.data(for: request)
         } catch {
-            return .networkFailure(error.localizedDescription)
+            return .networkFailure("refresh request failed due to connectivity")
         }
 
         guard let httpResponse = response as? HTTPURLResponse else {
-            return .unexpectedFailure(URLError(.badServerResponse).localizedDescription)
+            return .unexpectedFailure("refresh endpoint returned an invalid response")
         }
 
         guard httpResponse.statusCode == 200 else {
             if [400, 401, 403].contains(httpResponse.statusCode) {
                 return .authRejected(httpResponse.statusCode)
             }
-            let bodyString = String(data: data, encoding: .utf8) ?? ""
-            return .unexpectedFailure("HTTP \(httpResponse.statusCode): \(String(bodyString.prefix(200)))")
+            return .unexpectedFailure("refresh endpoint returned HTTP \(httpResponse.statusCode)")
         }
 
         let payload: RefreshResponse
         do {
             payload = try JSONDecoder().decode(RefreshResponse.self, from: data)
         } catch {
-            return .unexpectedFailure(error.localizedDescription)
+            return .unexpectedFailure("refresh response decoding failed")
         }
 
         let updatedSnapshot = OAuthCredentialSnapshot(

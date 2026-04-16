@@ -3,15 +3,13 @@ import SwiftUI
 struct GameOverView: View {
     let usage: UsageResponse
 
-    @State private var blinkVisible = true
-
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1.0)) { _ in
-            content
+        TimelineView(.periodic(from: .now, by: 0.8)) { context in
+            content(blinkVisible: blinkVisible(at: context.date))
         }
     }
 
-    private var content: some View {
+    private func content(blinkVisible: Bool) -> some View {
         VStack(spacing: 0) {
             Spacer()
 
@@ -51,13 +49,6 @@ struct GameOverView: View {
         }
         .frame(maxWidth: .infinity)
         .multilineTextAlignment(.center)
-        .onAppear {
-            Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { _ in
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    blinkVisible.toggle()
-                }
-            }
-        }
     }
 
     private var countdownText: String {
@@ -75,5 +66,9 @@ struct GameOverView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm a"
         return formatter.string(from: date).uppercased()
+    }
+
+    private func blinkVisible(at date: Date) -> Bool {
+        Int(date.timeIntervalSinceReferenceDate / 0.8) % 2 == 0
     }
 }

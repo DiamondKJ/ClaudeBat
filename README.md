@@ -40,7 +40,7 @@ Requires macOS 14+ and [Claude Code](https://docs.anthropic.com/en/docs/claude-c
 
 - Session (5h) and weekly (7d) usage in the menu bar
 - Sonnet breakdown, extra usage spend/limit
-- Auto-polls every 75s when open, 120s when closed
+- Auto-polls every 65s when open, 120s when closed
 - No manual refresh. It just works.
 
 ## How It Works

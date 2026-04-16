@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import AppKit
 
+@MainActor
 @Observable
 public final class UsageViewModel {
     // MARK: - Published State
@@ -51,6 +52,7 @@ public final class UsageViewModel {
     private let wakeAuthRetryInterval: TimeInterval
 
     private var pollingTimer: Timer?
+    private var wakeAuthRetryTask: Task<Void, Never>?
     private var scheduledPollDelayOverride: TimeInterval?
     private var isFetching = false
     private var consecutiveFailures = 0
@@ -73,13 +75,15 @@ public final class UsageViewModel {
     private var lastWakeNotificationAt: Date?
     private var activeWakeRecoveryStartedAt: Date?
     private var wakeAuthRetryPending = false
+    private var wakeAuthRetryAttempted = false
     private var recoverySnapshot: RecoverySnapshot
     private var sessionClassifierDecision: SessionClassifierDecision = .fetchUsageNormally
     private var authRecoveryPhase: AuthRecoveryPhase = .idle
     private var authRecoveryResult: AuthRecoveryResult?
     private var isAuthRecoveryInFlight = false
+    private var credentialSnapshot: OAuthCredentialSnapshot?
 
-    private static let basePollOpen: TimeInterval = 120
+    private static let basePollOpen: TimeInterval = 65
     private static let basePollClosed: TimeInterval = 120
     private static let maxBackoff: TimeInterval = 1800
     private static let maxResetBoundaryPriorityAttempts = 2
@@ -111,7 +115,7 @@ public final class UsageViewModel {
     }
 
     private var hasRefreshableCredentials: Bool {
-        guard let snapshot = tokenProvider.readOAuthSnapshot() else { return false }
+        guard let snapshot = credentialSnapshot else { return false }
         guard let refreshToken = snapshot.refreshToken else { return false }
         return !refreshToken.isEmpty
     }
@@ -170,6 +174,7 @@ public final class UsageViewModel {
         self.recoverySnapshot = recoveryStore.read() ?? RecoverySnapshot()
         self.authRecoveryPhase = self.recoverySnapshot.authRecoveryPhase ?? .idle
         self.authRecoveryResult = self.recoverySnapshot.lastRecoveryResult
+        self.credentialSnapshot = tokenProvider.readOAuthSnapshot()
 
         if let cached = cache.read() {
             usage = cached.value
@@ -184,17 +189,22 @@ public final class UsageViewModel {
             observeSleepWake()
             startPolling()
 
-            Task { @MainActor in
+            Task {
                 await fetchIfBudgetAllows(trigger: .appLaunch)
             }
         }
     }
 
-    deinit {
+    public func shutdown() {
         pollingTimer?.invalidate()
+        winkTimer?.invalidate()
+        wakeAuthRetryTask?.cancel()
         if let obs = sleepObserver { NSWorkspace.shared.notificationCenter.removeObserver(obs) }
         if let obs = screenWakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(obs) }
         if let obs = machineWakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(obs) }
+        sleepObserver = nil
+        screenWakeObserver = nil
+        machineWakeObserver = nil
     }
 
     // MARK: - Public Actions
@@ -212,14 +222,10 @@ public final class UsageViewModel {
     }
 
     public func recordAppTermination() {
-        let event = MonitorEvent(category: .lifecycle, action: "terminate", message: "app shutting down")
-        let status = makeMonitorStatus(appRunning: false)
-        let semaphore = DispatchSemaphore(value: 0)
-        Task {
-            await monitor.record(event: event, status: status)
-            semaphore.signal()
-        }
-        _ = semaphore.wait(timeout: .now() + 1)
+        recordMonitorEvent(
+            MonitorEvent(category: .lifecycle, action: "terminate", message: "app shutting down"),
+            appRunning: false
+        )
     }
 
     public func onPopoverOpen() {
@@ -237,7 +243,7 @@ public final class UsageViewModel {
         }
 
         if needsFetch {
-            Task { @MainActor in
+            Task {
                 await fetchIfBudgetAllows(trigger: .popoverOpen)
             }
         }
@@ -328,7 +334,7 @@ public final class UsageViewModel {
             return .showRecoveringAndRetryLater
         }
 
-        if !reachability.isReachable() {
+        if reachability.currentStatus() == .unreachable {
             return .showOffline
         }
 
@@ -354,12 +360,13 @@ public final class UsageViewModel {
     @MainActor
     private func startAuthRecovery(reason: String, trigger: FetchTrigger) async {
         guard !isAuthRecoveryInFlight else { return }
-        guard reachability.isReachable() else {
+        guard reachability.currentStatus() != .unreachable else {
             authRecoveryResult = .offline
             authRecoveryPhase = .failedRequiresReconnect
             return
         }
-        guard let currentSnapshot = tokenProvider.readOAuthSnapshot() else {
+        refreshCredentialState()
+        guard let currentSnapshot = credentialSnapshot else {
             authRecoveryPhase = .failedRequiresReconnect
             authRecoveryResult = .missingCredentials
             if usage == nil {
@@ -400,6 +407,7 @@ public final class UsageViewModel {
         let result = await authRefresher.refreshCredentials(currentSnapshot: currentSnapshot)
         switch result {
         case .success(let newFingerprint):
+            refreshCredentialState()
             authRecoveryPhase = .awaitingUsageValidation
             authRecoveryResult = nil
             persistRecoverySnapshot {
@@ -456,7 +464,10 @@ public final class UsageViewModel {
                 await attemptClaudeCLIFallback(trigger: trigger)
             }
         case .missingRefreshToken:
-            failRecovery(.missingCredentials, trigger: trigger, reason: "missing refresh token")
+            recordMonitorEvent(
+                MonitorEvent(category: .auth, action: "native_refresh_failed", trigger: trigger, message: "missing refresh token")
+            )
+            await attemptClaudeCLIFallback(trigger: trigger)
         case .networkFailure(let message):
             authRecoveryResult = .offline
             authRecoveryPhase = .failedRequiresReconnect
@@ -475,6 +486,7 @@ public final class UsageViewModel {
                 MonitorEvent(category: .auth, action: "native_refresh_failed", trigger: trigger, message: message)
             )
             isAuthRecoveryInFlight = false
+            restartPolling(reason: "auth_recovery_failed")
         case .authRejected(let code):
             recordMonitorEvent(
                 MonitorEvent(category: .auth, action: "native_refresh_failed", trigger: trigger, outcome: .http401, message: "refresh rejected (\(code.map(String.init) ?? "unknown"))")
@@ -506,7 +518,8 @@ public final class UsageViewModel {
             MonitorEvent(category: .auth, action: "claude_cli_recovery_started", trigger: trigger, message: "launching hidden Claude session")
         )
 
-        let baseline = tokenProvider.readOAuthSnapshot()
+        refreshCredentialState()
+        let baseline = credentialSnapshot
         let result = await claudeCLIRecoverer.recoverAuth(
             baselineFingerprint: baseline?.fingerprint,
             baselineExpiresAt: baseline?.expiresAt,
@@ -516,11 +529,12 @@ public final class UsageViewModel {
 
         switch result {
         case .success:
+            refreshCredentialState()
             persistRecoverySnapshot {
                 let now = Date()
                 $0.lastSuccessfulAuthRefreshAt = now
                 $0.lastSuccessfulAuthRefreshMethod = .claudeCLI
-                let newFingerprint = self.tokenProvider.tokenFingerprint()
+                let newFingerprint = self.credentialSnapshot?.fingerprint
                 if $0.lastTokenFingerprint != newFingerprint {
                     $0.lastTokenFingerprint = newFingerprint
                     $0.lastTokenFingerprintChangedAt = now
@@ -604,6 +618,7 @@ public final class UsageViewModel {
         recordMonitorEvent(
             MonitorEvent(category: .auth, action: "manual_reconnect_required", trigger: trigger, message: reason)
         )
+        restartPolling(reason: "auth_recovery_failed")
     }
 
     private func persistRecoverySnapshot(_ mutate: (inout RecoverySnapshot) -> Void) {
@@ -622,7 +637,15 @@ public final class UsageViewModel {
 
     @MainActor
     private func fetchIfBudgetAllows(trigger originalTrigger: FetchTrigger = .pollTimer, allowSessionPreflight: Bool) async {
-        if allowSessionPreflight {
+        refreshCredentialState()
+        var shouldRunSessionPreflight = allowSessionPreflight
+
+        if wakeAuthRetryPending, originalTrigger == .pollTimer {
+            wakeAuthRetryPending = false
+            shouldRunSessionPreflight = false
+        }
+
+        if shouldRunSessionPreflight {
             let handled = await handleSessionPreflightIfNeeded(for: originalTrigger)
             if handled {
                 return
@@ -665,54 +688,33 @@ public final class UsageViewModel {
             MonitorEvent(category: .fetch, action: "started", trigger: trigger, message: "begin fetch attempt")
         )
 
-        let canGo = await budget.canRequest()
-        if !canGo {
-            if trigger == .resetBoundary {
-                let serverBlocked = await budget.isServerCooldownActive()
-                if serverBlocked {
-                    let nextDelay = await rescheduleForBudgetAvailability(reason: "server_cooldown_wait")
-                    lastFailureAt = Date()
-                    lastFailureReason = FetchOutcome.serverCooldownBlocked.rawValue
-                    lastRetryAfterSeconds = nextDelay
-                    recordMonitorEvent(
-                        MonitorEvent(
-                            category: .fetch,
-                            action: "blocked",
-                            trigger: .resetBoundary,
-                            outcome: .serverCooldownBlocked,
-                            message: "server retry-after still active",
-                            retryAfterSeconds: nextDelay
-                        )
-                    )
-                    return
-                }
-            } else {
-                let serverBlocked = await budget.isServerCooldownActive()
-                let nextDelay = await rescheduleForBudgetAvailability(
-                    reason: serverBlocked ? "server_cooldown_wait" : "budget_window_wait"
+        let budgetDecision = await budget.reserveRequest(allowWindowBypass: trigger == .resetBoundary)
+        if budgetDecision != .granted {
+            let serverBlocked = budgetDecision == .blockedByServerCooldown
+            let nextDelay = await rescheduleForBudgetAvailability(
+                reason: serverBlocked ? "server_cooldown_wait" : "budget_window_wait"
+            )
+            lastFailureAt = Date()
+            lastFailureReason = serverBlocked
+                ? FetchOutcome.serverCooldownBlocked.rawValue
+                : FetchOutcome.budgetBlocked.rawValue
+            lastRetryAfterSeconds = serverBlocked ? nextDelay : nil
+            recordMonitorEvent(
+                MonitorEvent(
+                    category: .fetch,
+                    action: "blocked",
+                    trigger: trigger,
+                    outcome: serverBlocked ? .serverCooldownBlocked : .budgetBlocked,
+                    message: serverBlocked
+                        ? "server retry-after still active"
+                        : "local sliding-window budget exhausted",
+                    retryAfterSeconds: serverBlocked ? nextDelay : nil
                 )
-                lastFailureAt = Date()
-                lastFailureReason = serverBlocked
-                    ? FetchOutcome.serverCooldownBlocked.rawValue
-                    : FetchOutcome.budgetBlocked.rawValue
-                lastRetryAfterSeconds = serverBlocked ? nextDelay : nil
-                recordMonitorEvent(
-                    MonitorEvent(
-                        category: .fetch,
-                        action: "blocked",
-                        trigger: trigger,
-                        outcome: serverBlocked ? .serverCooldownBlocked : .budgetBlocked,
-                        message: serverBlocked
-                            ? "server retry-after still active"
-                            : "local sliding-window budget exhausted",
-                        retryAfterSeconds: serverBlocked ? nextDelay : nil
-                    )
-                )
-                return
-            }
+            )
+            return
         }
 
-        guard let token = tokenProvider.readToken() else {
+        guard let token = credentialSnapshot?.accessToken, !token.isEmpty else {
             lastFailureAt = Date()
             lastFailureReason = FetchOutcome.noToken.rawValue
             lastHTTPStatus = nil
@@ -745,12 +747,12 @@ public final class UsageViewModel {
             freshness = .empty
         }
 
-        await budget.recordRequest()
         recordResetBoundaryRequestIfNeeded(trigger)
 
         do {
             let response = try await api.fetchUsage(token: token)
             let successAt = Date()
+            clearCompletedAuthRecoveryFailureIfNeeded()
             cache.write(response)
             usage = response
             fetchedAt = successAt
@@ -771,7 +773,7 @@ public final class UsageViewModel {
                 $0.lastSuccessfulUsageAt = successAt
                 $0.lastSuccessfulUsageSessionResetAt = response.fiveHour.resetsAtDate
                 $0.authRecoveryPhase = self.authRecoveryPhase
-                if let fingerprint = self.tokenProvider.tokenFingerprint(), $0.lastTokenFingerprint != fingerprint {
+                if let fingerprint = self.credentialSnapshot?.fingerprint, $0.lastTokenFingerprint != fingerprint {
                     $0.lastTokenFingerprint = fingerprint
                     $0.lastTokenFingerprintChangedAt = successAt
                 }
@@ -823,11 +825,11 @@ public final class UsageViewModel {
         scheduledPollDelayOverride = repeats ? nil : interval
 
         let timer = Timer(timeInterval: interval, repeats: repeats) { [weak self] _ in
-            guard let self else { return }
-            if !repeats {
-                self.scheduledPollDelayOverride = nil
-            }
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if !repeats {
+                    self.scheduledPollDelayOverride = nil
+                }
                 await self.fetchIfBudgetAllows(trigger: .pollTimer)
             }
         }
@@ -849,7 +851,9 @@ public final class UsageViewModel {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.handleSleep()
+            Task { @MainActor [weak self] in
+                self?.handleSleep()
+            }
         }
 
         screenWakeObserver = nc.addObserver(
@@ -857,7 +861,9 @@ public final class UsageViewModel {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.handleWake(source: .screen)
+            Task { @MainActor [weak self] in
+                self?.handleWake(source: .screen)
+            }
         }
 
         machineWakeObserver = nc.addObserver(
@@ -865,7 +871,9 @@ public final class UsageViewModel {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.handleWake(source: .machine)
+            Task { @MainActor [weak self] in
+                self?.handleWake(source: .machine)
+            }
         }
     }
 
@@ -906,7 +914,7 @@ public final class UsageViewModel {
                     )
                 )
                 if dataAge > 300 {
-                    Task { @MainActor in
+                    Task {
                         await self.fetchIfBudgetAllows(trigger: trigger)
                     }
                 }
@@ -920,7 +928,7 @@ public final class UsageViewModel {
 
         restartPolling(reason: "\(source.rawValue)_wake")
         if dataAge > 300 {
-            Task { @MainActor in
+            Task {
                 let serverBlocked = await self.budget.isServerCooldownActive()
                 guard !serverBlocked else {
                     let nextDelay = await self.rescheduleForBudgetAvailability(reason: "wake_retry_after_wait")
@@ -943,7 +951,7 @@ public final class UsageViewModel {
                 await self.fetchIfBudgetAllows(trigger: trigger)
             }
         } else {
-            Task { @MainActor in
+            Task {
                 await self.fetchIfBudgetAllows(trigger: trigger)
             }
         }
@@ -963,12 +971,15 @@ public final class UsageViewModel {
     private var winkTimer: Timer?
 
     private func startBatWink() {
+        winkTimer?.invalidate()
         let expressions: [BatExpression] = [.winking, .default]
         var index = 0
         batExpression = .winking
         winkTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            index = (index + 1) % expressions.count
-            self?.batExpression = expressions[index]
+            Task { @MainActor [weak self] in
+                index = (index + 1) % expressions.count
+                self?.batExpression = expressions[index]
+            }
         }
     }
 
@@ -1076,7 +1087,7 @@ public final class UsageViewModel {
     }
 
     public var hasNoAuth: Bool {
-        tokenProvider.readOAuthSnapshot() == nil && tokenProvider.readToken() == nil
+        credentialSnapshot == nil
     }
 
     public var hasError: Bool {
@@ -1146,7 +1157,7 @@ public final class UsageViewModel {
                 )
             )
 
-        case .httpError(let code, _):
+        case .httpError(let code):
             lastFailureAt = Date()
             lastHTTPStatus = code
             lastRetryAfterSeconds = nil
@@ -1180,9 +1191,13 @@ public final class UsageViewModel {
                         )
                     )
                 } else {
-                    Task { @MainActor in
-                        await Task.yield()
-                        await self.startAuthRecovery(reason: "http_401", trigger: trigger)
+                    if shouldRetryAuthAfterWake401() {
+                        scheduleWakeAuthRetry(trigger: trigger)
+                    } else {
+                        Task {
+                            await Task.yield()
+                            await self.startAuthRecovery(reason: "http_401", trigger: trigger)
+                        }
                     }
                 }
             } else {
@@ -1190,7 +1205,7 @@ public final class UsageViewModel {
                 consecutiveFailures += 1
                 restartPolling(reason: "http_error_backoff")
                 if usage == nil {
-                    errorMessage = error.localizedDescription
+                    errorMessage = "ClaudeBat could not refresh your usage right now."
                 } else {
                     freshness = .stale
                     setCachedDataReason(.serverError)
@@ -1214,7 +1229,7 @@ public final class UsageViewModel {
             consecutiveFailures += 1
             restartPolling(reason: "network_backoff")
             if usage == nil {
-                errorMessage = error.localizedDescription
+                errorMessage = networkErrorMessage()
             } else {
                 freshness = .stale
                 setCachedDataReason(.networkError)
@@ -1225,7 +1240,7 @@ public final class UsageViewModel {
                     action: "completed",
                     trigger: trigger,
                     outcome: .networkError,
-                    message: error.localizedDescription
+                    message: "usage request failed due to connectivity"
                 )
             )
 
@@ -1262,7 +1277,7 @@ public final class UsageViewModel {
         consecutiveFailures += 1
         restartPolling(reason: "unknown_error_backoff")
         if usage == nil {
-            errorMessage = error.localizedDescription
+            errorMessage = "ClaudeBat could not refresh your usage right now."
         } else {
             freshness = .stale
             setCachedDataReason(.networkError)
@@ -1273,7 +1288,7 @@ public final class UsageViewModel {
                 action: "completed",
                 trigger: trigger,
                 outcome: .networkError,
-                message: error.localizedDescription
+                message: "usage request failed unexpectedly"
             )
         )
     }
@@ -1333,6 +1348,15 @@ public final class UsageViewModel {
         }
     }
 
+    private func clearCompletedAuthRecoveryFailureIfNeeded() {
+        guard !isAuthRecoveryInFlight else { return }
+        guard authRecoveryPhase != .awaitingUsageValidation else { return }
+        guard authRecoveryPhase != .idle || authRecoveryResult != nil else { return }
+
+        authRecoveryPhase = .idle
+        authRecoveryResult = nil
+    }
+
     private func setCachedDataReason(_ reason: CachedDataReason?) {
         let previous = cachedDataReason
         guard previous != reason else { return }
@@ -1375,15 +1399,47 @@ public final class UsageViewModel {
 
     private func shouldRetryAuthAfterWake401() -> Bool {
         guard let activeWakeRecoveryStartedAt else { return false }
-        guard !wakeAuthRetryPending else { return false }
+        guard !wakeAuthRetryAttempted else { return false }
         guard Date().timeIntervalSince(activeWakeRecoveryStartedAt) <= Self.wakeAuthRetryGraceWindow else { return false }
         guard lastSuccessAt == nil || lastSuccessAt! < activeWakeRecoveryStartedAt else { return false }
         return true
     }
 
+    private func scheduleWakeAuthRetry(trigger: FetchTrigger) {
+        wakeAuthRetryPending = true
+        wakeAuthRetryAttempted = true
+        scheduledPollDelayOverride = wakeAuthRetryInterval
+        wakeAuthRetryTask?.cancel()
+        let retryInterval = wakeAuthRetryInterval
+        wakeAuthRetryTask = Task { [weak self] in
+            let nanoseconds = UInt64(max(0, retryInterval) * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: nanoseconds)
+            await self?.runWakeAuthRetryIfNeeded()
+        }
+        recordMonitorEvent(
+            MonitorEvent(
+                category: .auth,
+                action: "wake_auth_retry_scheduled",
+                trigger: trigger,
+                message: "retrying auth shortly after wake"
+            )
+        )
+    }
+
     private func clearWakeRecoveryState() {
+        wakeAuthRetryTask?.cancel()
+        wakeAuthRetryTask = nil
+        scheduledPollDelayOverride = nil
         activeWakeRecoveryStartedAt = nil
         wakeAuthRetryPending = false
+        wakeAuthRetryAttempted = false
+    }
+
+    private func runWakeAuthRetryIfNeeded() async {
+        guard wakeAuthRetryPending else { return }
+        wakeAuthRetryPending = false
+        scheduledPollDelayOverride = nil
+        await fetchIfBudgetAllows(trigger: .pollTimer, allowSessionPreflight: false)
     }
 
     private func isOfflineErrorMessage(_ message: String?) -> Bool {
@@ -1392,6 +1448,14 @@ public final class UsageViewModel {
             || message.contains("internet")
             || message.contains("offline")
             || message.contains("network connection")
+    }
+
+    private func refreshCredentialState() {
+        credentialSnapshot = tokenProvider.readOAuthSnapshot()
+    }
+
+    private func networkErrorMessage() -> String {
+        "ClaudeBat could not reach the usage endpoint. Check your internet connection."
     }
 
     private func recordMonitorEvent(_ event: MonitorEvent, appRunning: Bool = true) {
@@ -1404,9 +1468,7 @@ public final class UsageViewModel {
     private func rescheduleForBudgetAvailability(reason: String) async -> Int? {
         guard let nextAllowedAt = await budget.nextAllowedAt() else { return nil }
         let delay = max(1, Int(nextAllowedAt.timeIntervalSinceNow.rounded(.up)))
-        await MainActor.run {
-            self.restartPolling(reason: reason, after: TimeInterval(delay))
-        }
+        restartPolling(reason: reason, after: TimeInterval(delay))
         return delay
     }
 

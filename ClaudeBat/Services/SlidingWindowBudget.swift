@@ -13,22 +13,19 @@ public actor SlidingWindowBudget: BudgetTracking {
         self.now = now
     }
 
-    /// Can we make a request right now?
-    public func canRequest() -> Bool {
+    public func reserveRequest(allowWindowBypass: Bool = false) -> BudgetReservationDecision {
         pruneExpired()
 
-        // Respect Retry-After from 429
         if let retryDate = retryAfterDate, now() < retryDate {
-            return false
+            return .blockedByServerCooldown
         }
 
-        return timestamps.count < maxRequests
-    }
+        if !allowWindowBypass, timestamps.count >= maxRequests {
+            return .blockedByLocalWindow
+        }
 
-    /// Record that a request was just made.
-    public func recordRequest() {
-        pruneExpired()
         timestamps.append(now())
+        return .granted
     }
 
     /// When is the next slot available? Returns nil if a slot is free now.

@@ -14,7 +14,7 @@ struct NoAuthView: View {
         if let forced = forceInstalled { return forced }
         return FileManager.default.fileExists(atPath: "/usr/local/bin/claude")
             || FileManager.default.fileExists(atPath: "/opt/homebrew/bin/claude")
-            || which("claude")
+            || executableOnPath(named: "claude")
     }
 
     var body: some View {
@@ -75,19 +75,19 @@ struct NoAuthView: View {
         .padding(.horizontal, CBSpacing.popupPadding)
     }
 
-    private func which(_ cmd: String) -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        process.arguments = [cmd]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
-            return false
+    private func executableOnPath(named command: String) -> Bool {
+        let pathEntries = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+            .split(separator: ":")
+            .map(String.init)
+
+        for directory in pathEntries {
+            let candidate = URL(fileURLWithPath: directory).appendingPathComponent(command).path
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return true
+            }
         }
+
+        return false
     }
 
     private var title: String {

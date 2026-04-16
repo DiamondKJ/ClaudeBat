@@ -6,63 +6,64 @@ import Foundation
 struct SlidingWindowBudgetTests {
 
     @Test func fiveRequestsInWindow_blocks() async {
-        var time = Date()
-        let budget = SlidingWindowBudget(now: { time })
+        let timeSource = TimeSource()
+        let budget = SlidingWindowBudget(now: { timeSource.now })
 
         for _ in 0..<5 {
-            await budget.recordRequest()
-            time = time.addingTimeInterval(1)
+            let decision = await budget.reserveRequest(allowWindowBypass: false)
+            #expect(decision == .granted)
+            timeSource.now = timeSource.now.addingTimeInterval(1)
         }
 
-        let canGo = await budget.canRequest()
-        #expect(!canGo)
+        let decision = await budget.reserveRequest(allowWindowBypass: false)
+        #expect(decision == .blockedByLocalWindow)
     }
 
     @Test func windowExpires_unblocks() async {
-        var time = Date()
-        let budget = SlidingWindowBudget(now: { time })
+        let timeSource = TimeSource()
+        let budget = SlidingWindowBudget(now: { timeSource.now })
 
         for _ in 0..<5 {
-            await budget.recordRequest()
+            _ = await budget.reserveRequest(allowWindowBypass: false)
         }
 
         // Advance past the 300s window
-        time = time.addingTimeInterval(301)
+        timeSource.now = timeSource.now.addingTimeInterval(301)
 
-        let canGo = await budget.canRequest()
-        #expect(canGo)
+        let decision = await budget.reserveRequest(allowWindowBypass: false)
+        #expect(decision == .granted)
     }
 
     @Test func retryAfter_blocks() async {
-        var time = Date()
-        let budget = SlidingWindowBudget(now: { time })
+        let timeSource = TimeSource()
+        let budget = SlidingWindowBudget(now: { timeSource.now })
 
         await budget.setRetryAfter(seconds: 60)
-        time = time.addingTimeInterval(30)
+        timeSource.now = timeSource.now.addingTimeInterval(30)
 
-        let canGo = await budget.canRequest()
-        #expect(!canGo)
+        let decision = await budget.reserveRequest(allowWindowBypass: false)
+        #expect(decision == .blockedByServerCooldown)
     }
 
     @Test func retryAfter_expires() async {
-        var time = Date()
-        let budget = SlidingWindowBudget(now: { time })
+        let timeSource = TimeSource()
+        let budget = SlidingWindowBudget(now: { timeSource.now })
 
         await budget.setRetryAfter(seconds: 60)
-        time = time.addingTimeInterval(61)
+        timeSource.now = timeSource.now.addingTimeInterval(61)
 
-        let canGo = await budget.canRequest()
-        #expect(canGo)
+        let decision = await budget.reserveRequest(allowWindowBypass: false)
+        #expect(decision == .granted)
     }
 
     @Test func isServerCooldownActive_independentOfWindow() async {
-        var time = Date()
-        let budget = SlidingWindowBudget(now: { time })
+        let timeSource = TimeSource()
+        let budget = SlidingWindowBudget(now: { timeSource.now })
 
         // Fill the window
         for _ in 0..<5 {
-            await budget.recordRequest()
-            time = time.addingTimeInterval(1)
+            _ = await budget.reserveRequest(allowWindowBypass: false)
+            timeSource.now = timeSource.now.addingTimeInterval(1)
         }
 
         // Window is full, but no retry-after set
@@ -72,12 +73,12 @@ struct SlidingWindowBudgetTests {
 
     @Test func nextAllowedAt_returnsOldestPlusWindow() async {
         let startTime = Date()
-        var time = startTime
-        let budget = SlidingWindowBudget(now: { time })
+        let timeSource = TimeSource(now: startTime)
+        let budget = SlidingWindowBudget(now: { timeSource.now })
 
         for _ in 0..<5 {
-            await budget.recordRequest()
-            time = time.addingTimeInterval(1)
+            _ = await budget.reserveRequest(allowWindowBypass: false)
+            timeSource.now = timeSource.now.addingTimeInterval(1)
         }
 
         let nextAllowed = await budget.nextAllowedAt()
@@ -89,12 +90,12 @@ struct SlidingWindowBudgetTests {
 
     @Test func nextAllowedAt_prefersRetryDate_whenLater() async {
         let startTime = Date()
-        var time = startTime
-        let budget = SlidingWindowBudget(now: { time })
+        let timeSource = TimeSource(now: startTime)
+        let budget = SlidingWindowBudget(now: { timeSource.now })
 
         for _ in 0..<5 {
-            await budget.recordRequest()
-            time = time.addingTimeInterval(1)
+            _ = await budget.reserveRequest(allowWindowBypass: false)
+            timeSource.now = timeSource.now.addingTimeInterval(1)
         }
 
         // Set retry-after that extends beyond window expiry
@@ -103,7 +104,29 @@ struct SlidingWindowBudgetTests {
         let nextAllowed = await budget.nextAllowedAt()
         #expect(nextAllowed != nil)
         // Retry-after date (~startTime+5+600=605) > oldest+window (startTime+300)
-        let retryExpected = time.addingTimeInterval(600)
+        let retryExpected = timeSource.now.addingTimeInterval(600)
         #expect(abs(nextAllowed!.timeIntervalSince(retryExpected)) < 1)
+    }
+
+    @Test func bypassedRequest_stillReservesWithoutWindowAllowance() async {
+        let timeSource = TimeSource()
+        let budget = SlidingWindowBudget(now: { timeSource.now })
+
+        for _ in 0..<5 {
+            _ = await budget.reserveRequest(allowWindowBypass: false)
+            timeSource.now = timeSource.now.addingTimeInterval(1)
+        }
+
+        let decision = await budget.reserveRequest(allowWindowBypass: true)
+        #expect(decision == .granted)
+        #expect(await budget.remainingBudget() == 0)
+    }
+}
+
+private final class TimeSource: @unchecked Sendable {
+    var now: Date
+
+    init(now: Date = Date()) {
+        self.now = now
     }
 }

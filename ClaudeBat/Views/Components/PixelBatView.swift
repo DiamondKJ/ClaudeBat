@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Bat Expressions
 
-public enum BatExpression: CaseIterable {
+public enum BatExpression: CaseIterable, Sendable {
     case `default`
     case winking
     case sleeping

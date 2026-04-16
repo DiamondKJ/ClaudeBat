@@ -48,7 +48,7 @@ public actor MonitorService: AppMonitoring {
             try append(record: record)
             try write(status: status)
         } catch {
-            logger.error("monitor_write_failed path=\(self.eventLogURL.path, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+            logger.error("monitor_write_failed")
         }
     }
 

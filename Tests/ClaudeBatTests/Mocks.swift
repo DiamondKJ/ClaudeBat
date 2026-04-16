@@ -14,8 +14,16 @@ actor MockBudget: BudgetTracking {
         _nextAllowed = nextAllowed
     }
 
-    func canRequest() -> Bool { _allowRequests && !_serverCooldownActive }
-    func recordRequest() { _requestCount += 1 }
+    func reserveRequest(allowWindowBypass: Bool) -> BudgetReservationDecision {
+        if _serverCooldownActive {
+            return .blockedByServerCooldown
+        }
+        if !_allowRequests && !allowWindowBypass {
+            return .blockedByLocalWindow
+        }
+        _requestCount += 1
+        return .granted
+    }
     func setRetryAfter(seconds: TimeInterval) {
         _serverCooldownActive = true
         _retryAfterCalled = true
@@ -113,6 +121,10 @@ actor MockMonitor: AppMonitoring {
         records
     }
 
+    func latestRecord() -> MockMonitorRecord? {
+        records.last
+    }
+
     func containsEvent(
         category: MonitorEventCategory? = nil,
         action: String? = nil,
@@ -171,6 +183,6 @@ struct MockClaudeCLIRecoverer: ClaudeCLIRecovering {
 }
 
 struct MockReachability: NetworkReachabilityChecking {
-    var reachable: Bool = true
-    func isReachable() -> Bool { reachable }
+    var status: NetworkReachabilityStatus = .reachable
+    func currentStatus() -> NetworkReachabilityStatus { status }
 }

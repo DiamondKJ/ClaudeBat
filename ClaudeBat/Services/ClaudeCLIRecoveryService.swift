@@ -1,11 +1,9 @@
 import Foundation
 
 public struct ClaudeCLIRecoveryService: ClaudeCLIRecovering {
-    private let shellPath: String
     private let claudeCommand: String
 
-    public init(shellPath: String = "/bin/zsh", claudeCommand: String = "claude") {
-        self.shellPath = shellPath
+    public init(claudeCommand: String = "claude") {
         self.claudeCommand = claudeCommand
     }
 
@@ -15,9 +13,13 @@ public struct ClaudeCLIRecoveryService: ClaudeCLIRecovering {
         tokenProvider: any TokenProvider,
         timeout: TimeInterval = 20
     ) async -> ClaudeCLIRecoveryResult {
+        guard let claudeExecutable = Self.resolveExecutable(named: claudeCommand) else {
+            return .launchFailed("Claude CLI executable not found")
+        }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/script")
-        process.arguments = ["-q", "/dev/null", shellPath, "-lc", claudeCommand]
+        process.arguments = ["-q", "/dev/null", claudeExecutable]
         process.standardInput = Pipe()
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
@@ -25,7 +27,7 @@ public struct ClaudeCLIRecoveryService: ClaudeCLIRecovering {
         do {
             try process.run()
         } catch {
-            return .launchFailed(error.localizedDescription)
+            return .launchFailed("failed to launch Claude CLI")
         }
 
         let deadline = Date().addingTimeInterval(timeout)
@@ -61,5 +63,26 @@ public struct ClaudeCLIRecoveryService: ClaudeCLIRecovering {
         }
 
         return .timedOut
+    }
+
+    private static func resolveExecutable(named command: String) -> String? {
+        if command.contains("/") {
+            return FileManager.default.isExecutableFile(atPath: command) ? command : nil
+        }
+
+        let pathEntries = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+            .split(separator: ":")
+            .map(String.init)
+
+        for directory in ["/opt/homebrew/bin", "/usr/local/bin"] + pathEntries {
+            let candidate = URL(fileURLWithPath: directory)
+                .appendingPathComponent(command)
+                .path
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+
+        return nil
     }
 }

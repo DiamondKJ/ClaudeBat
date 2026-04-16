@@ -2,17 +2,32 @@ import SwiftUI
 
 public struct UsagePopoverView: View {
     @Bindable var viewModel: UsageViewModel
+    let onPreferredHeightChange: ((CGFloat) -> Void)?
 
-    public init(viewModel: UsageViewModel) {
+    public init(viewModel: UsageViewModel, onPreferredHeightChange: ((CGFloat) -> Void)? = nil) {
         self.viewModel = viewModel
+        self.onPreferredHeightChange = onPreferredHeightChange
     }
 
     @Environment(\.dismiss) private var dismiss
 
     public var body: some View {
         liveContent
-            .onAppear { viewModel.onPopoverOpen() }
-            .onDisappear { viewModel.onPopoverClose() }
+            .onAppear {
+                onPreferredHeightChange?(preferredHeight)
+            }
+            .onChange(of: preferredHeight) { _, newValue in
+                onPreferredHeightChange?(newValue)
+            }
+    }
+
+    private var preferredHeight: CGFloat {
+        switch viewModel.popoverScreen {
+        case .usage where viewModel.shouldShowCachedBanner:
+            return CBSpacing.popupHeightWithBanner
+        default:
+            return CBSpacing.popupHeight
+        }
     }
 
     @ViewBuilder
@@ -32,7 +47,7 @@ public struct UsagePopoverView: View {
             }
         case .recovering:
             LoadingRetroView(title: "SYNCING", message: viewModel.recoveryMessage)
-                .frame(width: CBSpacing.popupWidth, height: CBSpacing.popupHeight)
+                .frame(width: CBSpacing.popupWidth, height: preferredHeight)
                 .background(CBColor.base)
                 .clipShape(RoundedRectangle(cornerRadius: CBRadius.popup))
         case .usage:
@@ -56,7 +71,7 @@ public struct UsagePopoverView: View {
             }
         case .loading:
             LoadingRetroView(title: "LOADING")
-                .frame(width: CBSpacing.popupWidth, height: CBSpacing.popupHeight)
+                .frame(width: CBSpacing.popupWidth, height: preferredHeight)
                 .background(CBColor.base)
                 .clipShape(RoundedRectangle(cornerRadius: CBRadius.popup))
         }
@@ -74,7 +89,7 @@ public struct UsagePopoverView: View {
                 .frame(maxHeight: .infinity)
         }
         .padding(CBSpacing.popupPadding)
-        .frame(width: CBSpacing.popupWidth, height: CBSpacing.popupHeight)
+        .frame(width: CBSpacing.popupWidth, height: preferredHeight)
         .background(CBColor.surface)
         .clipShape(RoundedRectangle(cornerRadius: CBRadius.popup))
     }

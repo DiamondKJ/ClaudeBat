@@ -37,3 +37,6 @@ kj-designs/
 bat-pixel-art.js
 scripts/rate-limit-experiment.sh
 scripts/rate-limit-results.log
+
+# Local Netlify folder
+.netlify
