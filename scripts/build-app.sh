@@ -45,7 +45,7 @@ else
     ARCH_FLAGS=""
 fi
 
-swift build -c release $ARCH_FLAGS 2>&1 | tail -5
+swift build -c release $ARCH_FLAGS 2>&1 || { echo "ERROR: Build failed"; exit 1; }
 
 BINARY="$(swift build -c release $ARCH_FLAGS --show-bin-path)/ClaudeBat"
 if [ ! -f "$BINARY" ]; then
