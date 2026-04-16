@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 public struct UsagePopoverView: View {
     @Bindable var viewModel: UsageViewModel
     let onPreferredHeightChange: ((CGFloat) -> Void)?
