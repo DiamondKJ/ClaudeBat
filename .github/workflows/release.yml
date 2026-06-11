@@ -21,6 +21,11 @@ jobs:
       - name: Build app and DMG
         run: VERSION_OVERRIDE="$VERSION" ./scripts/build-app.sh --dmg
 
+      - name: Create stable-named DMG copy
+        # Non-versioned copy so the website can always link to the newest
+        # release via /releases/latest/download/ClaudeBat.dmg
+        run: cp "build/ClaudeBat-${VERSION}.dmg" "build/ClaudeBat.dmg"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -52,6 +57,8 @@ jobs:
             ```
 
             Requires macOS 14+ and Claude Code logged in.
-          files: build/ClaudeBat-${{ env.VERSION }}.dmg
+          files: |
+            build/ClaudeBat-${{ env.VERSION }}.dmg
+            build/ClaudeBat.dmg
           draft: false
           prerelease: false
