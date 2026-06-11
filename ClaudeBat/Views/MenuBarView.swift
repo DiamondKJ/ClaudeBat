@@ -1,6 +1,7 @@
 import SwiftUI
 
 /// The menu bar label: number + segmented battery + cap
+@MainActor
 public struct MenuBarLabel: View {
     let viewModel: UsageViewModel
     /// Called when the per-state tooltip text changes, so the host can set it on
