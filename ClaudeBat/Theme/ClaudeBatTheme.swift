@@ -38,6 +38,16 @@ enum CBColor {
     }
 }
 
+// MARK: - External Links
+
+public enum CBLinks {
+    /// Claude usage/billing settings — the actionable destination from terminal
+    /// states (GAME OVER, context menu). claude.ai is a SPA, so /settings/* routes
+    /// client-side and degrades gracefully even if the exact path changes. Single
+    /// source of truth so it's trivial to update.
+    public static let manageUsage = URL(string: "https://claude.ai/settings/usage")!
+}
+
 // MARK: - NSColor equivalents for AppKit
 
 public enum CBNSColor {
@@ -60,7 +70,8 @@ enum CBFont {
     }
 
     // Named sizes from design system
-    static let menuBarNumber = pixelFont(size: 11)
+    // NOTE: the menu-bar number deliberately uses SF Pro rounded (see MenuBarView),
+    // not a pixel font — Press Start 2P is muddy and reflows the status item at 11px.
     static let displayNumber = pixelFont(size: 32)
     static let weeklyNumber = pixelFont(size: 16)
     static let modelNumber = pixelFont(size: 11)

@@ -40,3 +40,6 @@ scripts/rate-limit-results.log
 
 # Local Netlify folder
 .netlify
+
+# Local dev helper (not for release)
+OPEN-DEV-BUILD.md

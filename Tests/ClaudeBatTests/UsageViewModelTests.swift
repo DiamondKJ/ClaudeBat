@@ -26,6 +26,64 @@ struct FetchPipelineTests {
     }
 
     @MainActor
+    @Test(arguments: [
+        (5.0, 5.0, false),    // both fine → not depleted
+        (100.0, 5.0, true),   // session exhausted → depleted (Game Over)
+        (5.0, 100.0, true),   // weekly exhausted → depleted (Game Over)
+        (100.0, 100.0, true), // both exhausted → depleted
+    ])
+    func isDepleted_whenEitherLimitExhausted(fiveHour: Double, sevenDay: Double, expected: Bool) async {
+        let api = MockAPI()
+        api.response = .fixture(fiveHourUtilization: fiveHour, sevenDayUtilization: sevenDay)
+        let vm = UsageViewModel(
+            tokenProvider: MockTokenProvider(token: "tok"),
+            api: api,
+            budget: MockBudget(),
+            cache: MockCache(),
+            startImmediately: false
+        )
+
+        await vm.fetchIfBudgetAllows()
+
+        #expect(vm.isDepleted == expected)
+    }
+
+    @MainActor
+    @Test func menuBarTooltip_normalShowsBothRemaining() async {
+        let api = MockAPI()
+        api.response = .fixture(fiveHourUtilization: 20, sevenDayUtilization: 40) // 80 / 60 left
+        let vm = UsageViewModel(
+            tokenProvider: MockTokenProvider(token: "tok"),
+            api: api,
+            budget: MockBudget(),
+            cache: MockCache(),
+            startImmediately: false
+        )
+
+        await vm.fetchIfBudgetAllows()
+
+        #expect(vm.menuBarTooltip.contains("Session 80 left"))
+        #expect(vm.menuBarTooltip.contains("This week 60 left"))
+    }
+
+    @MainActor
+    @Test func menuBarTooltip_weeklyDepletedExplainsWhichLimit() async {
+        let api = MockAPI()
+        api.response = .fixture(fiveHourUtilization: 50, sevenDayUtilization: 100) // weekly cooked
+        let vm = UsageViewModel(
+            tokenProvider: MockTokenProvider(token: "tok"),
+            api: api,
+            budget: MockBudget(),
+            cache: MockCache(),
+            startImmediately: false
+        )
+
+        await vm.fetchIfBudgetAllows()
+
+        #expect(vm.menuBarTooltip.contains("Weekly limit reached"))
+    }
+
+    @MainActor
     @Test func budgetExhausted_doesNotFetch() async {
         let api = MockAPI()
         api.response = .fixture()
@@ -474,6 +532,68 @@ struct UsageViewModelMonitoringTests {
         #expect(await monitor.containsEvent(category: .fetch, action: "blocked", outcome: .serverCooldownBlocked))
         let status = await monitor.latestStatus()
         #expect(status?.currentPollIntervalSeconds ?? 0 >= 85)
+    }
+
+    @MainActor
+    @Test func popoverOpen_preservesPendingCooldownTimerWhenCachedDataIsFresh() async {
+        let api = MockAPI()
+        let cache = MockCache()
+        cache.stored = Timestamped(value: .fixture(), fetchedAt: Date())
+        let monitor = MockMonitor()
+        let budget = MockBudget(
+            allowRequests: true,
+            serverCooldownActive: true,
+            nextAllowed: Date().addingTimeInterval(10)
+        )
+
+        let vm = UsageViewModel(
+            tokenProvider: MockTokenProvider(token: "tok"),
+            api: api,
+            budget: budget,
+            cache: cache,
+            monitor: monitor,
+            startImmediately: false
+        )
+
+        await vm.fetchIfBudgetAllows(trigger: .pollTimer)
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        vm.onPopoverOpen()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(api.fetchCount == 0)
+        let status = await monitor.latestStatus()
+        #expect((status?.currentPollIntervalSeconds ?? 0) <= 9)
+    }
+
+    @MainActor
+    @Test func popoverClose_preservesPendingCooldownTimer() async {
+        let api = MockAPI()
+        let cache = MockCache()
+        cache.stored = Timestamped(value: .fixture(), fetchedAt: Date().addingTimeInterval(-300))
+        let monitor = MockMonitor()
+        let budget = MockBudget(
+            allowRequests: true,
+            serverCooldownActive: true,
+            nextAllowed: Date().addingTimeInterval(10)
+        )
+
+        let vm = UsageViewModel(
+            tokenProvider: MockTokenProvider(token: "tok"),
+            api: api,
+            budget: budget,
+            cache: cache,
+            monitor: monitor,
+            startImmediately: false
+        )
+
+        await vm.fetchIfBudgetAllows(trigger: .pollTimer)
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        vm.onPopoverClose()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(api.fetchCount == 0)
+        let status = await monitor.latestStatus()
+        #expect((status?.currentPollIntervalSeconds ?? 0) <= 9)
     }
 
     @MainActor

@@ -72,9 +72,7 @@ public struct UsagePeriod: Codable {
         let minutes = (Int(interval) % 3600) / 60
 
         if hours > 24 {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "MMM d, ha"
-            return "Resets \(formatter.string(from: date))"
+            return "Resets \(Self.formatResetTimestamp(date, reference: now))"
         } else if hours > 0 {
             return "Resets in \(hours)h \(minutes)m"
         } else {
@@ -85,9 +83,34 @@ public struct UsagePeriod: Codable {
     /// Short format for weekly display
     public var resetDateShort: String {
         guard let date = resetsAtDate else { return "" }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, ha"
-        return "Resets \(formatter.string(from: date))"
+        return "Resets \(Self.formatResetTimestamp(date))"
+    }
+
+    // MARK: - Reset time formatting (single source of truth)
+
+    // Locale-pinned (en_US_POSIX) so reset times read consistently across every
+    // surface and never garble in non-US locales — the retro look is intentionally
+    // en-US. All three render sites (SESSION, THIS WEEK, GAME OVER) go through
+    // `formatResetTimestamp`, killing the old "2PM" vs "2:30 PM" drift.
+    private static let datedResetFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "MMM d, h:mm a"
+        return f
+    }()
+
+    private static let timeResetFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "h:mm a"
+        return f
+    }()
+
+    /// Renders an absolute reset time consistently: a dated form for far-off
+    /// (weekly) resets, time-only for same-day (session) resets.
+    public static func formatResetTimestamp(_ date: Date, reference: Date = Date()) -> String {
+        let formatter = date.timeIntervalSince(reference) > 24 * 3600 ? datedResetFormatter : timeResetFormatter
+        return formatter.string(from: date)
     }
 }
 

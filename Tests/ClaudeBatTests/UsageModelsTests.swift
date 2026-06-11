@@ -13,17 +13,20 @@ struct UsageModelsTests {
         #expect(period.remainingInt == Int(expected.rounded()))
     }
 
-    @Test func isFullyMaxed_requiresBothZero() {
-        let maxed = UsageResponse.fixture(fiveHourUtilization: 100, sevenDayUtilization: 100)
+    @Test func depleted_whenEitherLimitZero() {
+        let both = UsageResponse.fixture(fiveHourUtilization: 100, sevenDayUtilization: 100)
         let fiveOnly = UsageResponse.fixture(fiveHourUtilization: 100, sevenDayUtilization: 50)
         let sevenOnly = UsageResponse.fixture(fiveHourUtilization: 50, sevenDayUtilization: 100)
         let neither = UsageResponse.fixture(fiveHourUtilization: 50, sevenDayUtilization: 50)
 
-        // isFullyMaxed is on the ViewModel, so test the underlying logic directly
-        #expect(maxed.fiveHour.remaining <= 0 && maxed.sevenDay.remaining <= 0)
-        #expect(!(fiveOnly.fiveHour.remaining <= 0 && fiveOnly.sevenDay.remaining <= 0))
-        #expect(!(sevenOnly.fiveHour.remaining <= 0 && sevenOnly.sevenDay.remaining <= 0))
-        #expect(!(neither.fiveHour.remaining <= 0 && neither.sevenDay.remaining <= 0))
+        // Mirrors UsageViewModel.isDepleted: blocked when EITHER limit is exhausted.
+        func depleted(_ u: UsageResponse) -> Bool {
+            u.fiveHour.remaining <= 0 || u.sevenDay.remaining <= 0
+        }
+        #expect(depleted(both))
+        #expect(depleted(fiveOnly))
+        #expect(depleted(sevenOnly))
+        #expect(!depleted(neither))
     }
 
     @Test func timeUntilReset_pastDate_returnsRecentlyReset() {
@@ -37,6 +40,24 @@ struct UsageModelsTests {
         let period = UsagePeriod(utilization: 50, resetsAt: future)
         let result = period.timeUntilReset
         #expect(result.hasPrefix("Resets in 1h"))
+    }
+
+    @Test func formatResetTimestamp_consistentAndLocaleStable() {
+        let now = Date()
+        let sameDay = now.addingTimeInterval(3 * 3600)        // 3h out
+        let farOff = now.addingTimeInterval(3 * 24 * 3600)    // 3 days out
+
+        let sameDayStr = UsagePeriod.formatResetTimestamp(sameDay, reference: now)
+        let farOffStr = UsagePeriod.formatResetTimestamp(farOff, reference: now)
+
+        // Same-day: time only — no date/comma.
+        #expect(!sameDayStr.contains(","))
+        #expect(sameDayStr.contains(":"))
+        // Far-off: dated form with a comma between date and time.
+        #expect(farOffStr.contains(","))
+        // Both en_US_POSIX (locale-stable) — AM/PM regardless of the host locale.
+        #expect(sameDayStr.contains("AM") || sameDayStr.contains("PM"))
+        #expect(farOffStr.contains("AM") || farOffStr.contains("PM"))
     }
 
     @Test func decodesNullableFiveHourReset() throws {

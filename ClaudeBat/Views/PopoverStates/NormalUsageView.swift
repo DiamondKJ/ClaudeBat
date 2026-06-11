@@ -76,14 +76,18 @@ struct NormalUsageView: View {
                 }
             }
 
-            Spacer().frame(height: 12)
+            // Model breakdown — shown only when the API actually returns Sonnet data.
+            // nil must NOT coalesce to 0 (that paints a fake red "maxed" row identical
+            // to a genuinely exhausted tier).
+            if let sonnet = usage.sevenDaySonnet {
+                Spacer().frame(height: 12)
 
-            // Model breakdown — Sonnet only (Opus not trackable via this API)
-            ModelBreakdownRow(
-                label: "Sonnet",
-                remaining: usage.sevenDaySonnet?.remaining ?? 0,
-                isMaxed: usage.sevenDaySonnet?.remaining ?? 0 <= 0
-            )
+                ModelBreakdownRow(
+                    label: "Sonnet",
+                    remaining: sonnet.remaining,
+                    isMaxed: sonnet.remaining <= 0
+                )
+            }
 
             // Extra usage section — only when enabled
             if let extra = usage.extraUsage, extra.isEnabled {

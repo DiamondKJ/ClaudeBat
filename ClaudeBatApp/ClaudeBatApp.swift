@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         setupPopover()
         setupContextPopover()
         setupEventMonitor()
+        setupDefaultLaunchAtLogin()
         viewModel.recordAppLaunch()
     }
 
@@ -59,7 +60,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             return
         }
 
-        let hostingView = NSHostingView(rootView: MenuBarLabel(viewModel: viewModel))
+        let hostingView = NSHostingView(rootView: MenuBarLabel(viewModel: viewModel, onTooltipChange: { [weak button] tip in
+            button?.toolTip = tip
+        }))
         hostingView.translatesAutoresizingMaskIntoConstraints = false
 
         button.subviews.forEach { $0.removeFromSuperview() }
@@ -81,8 +84,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func setupPopover() {
         popover = NSPopover()
         popover.contentSize = NSSize(width: PopoverLayout.width, height: PopoverLayout.baseHeight)
-        popover.behavior = .transient
-        popover.animates = true
+        // .applicationDefined (not .transient): we own every open/close so the status
+        // button can toggle reliably. .transient auto-closes on the mouse-DOWN before our
+        // mouse-UP action runs, which made isShown stale and caused close→reopen flicker
+        // when spamming the button. Outside-click closing is handled by the global monitor.
+        popover.behavior = .applicationDefined
+        // No fade: instant toggle matches the native menu bar feel and removes the
+        // animation races that left a phantom popover when clicking rapidly.
+        popover.animates = false
         popover.delegate = self
         popover.contentViewController = NSHostingController(
             rootView: UsagePopoverView(
@@ -105,7 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     private func setupContextPopover() {
         contextPopover = NSPopover()
-        contextPopover.behavior = .transient
+        contextPopover.behavior = .applicationDefined
         contextPopover.animates = true
         contextPopover.appearance = NSAppearance(named: .darkAqua)
         updateContextPopoverContent()
@@ -118,6 +127,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             onToggleLaunchAtLogin: { [weak self] in
                 self?.toggleLaunchAtLogin()
                 self?.updateContextPopoverContent()
+            },
+            onOpenUsage: { [weak self] in
+                self?.contextPopover.close()
+                self?.openManageUsage()
             },
             onAbout: { [weak self] in
                 self?.contextPopover.close()
@@ -150,13 +163,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         guard let event = NSApp.currentEvent else { return }
 
         if event.type == .rightMouseUp {
-            closeAllPopovers()
-            updateContextPopoverContent()
-            contextPopover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+            // Toggle: a second click on the button closes the menu instead of reopening it.
+            if contextPopover.isShown {
+                contextPopover.performClose(nil)
+            } else {
+                closeAllPopovers()
+                updateContextPopoverContent()
+                contextPopover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+            }
         } else {
-            closeAllPopovers()
-            updatePopoverSize(height: viewModel.shouldShowCachedBanner ? PopoverLayout.bannerHeight : PopoverLayout.baseHeight)
-            popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+            // Toggle: a second click on the button closes the popover instead of reopening it.
+            if popover.isShown {
+                popover.performClose(nil)
+            } else {
+                closeAllPopovers()
+                updatePopoverSize(height: viewModel.shouldShowCachedBanner ? PopoverLayout.bannerHeight : PopoverLayout.baseHeight)
+                popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+            }
         }
     }
 
@@ -177,6 +200,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         viewModel.onPopoverClose()
     }
 
+    /// On first launch, opt into Launch at Login by default — a menu-bar app is
+    /// expected to persist across reboots. Only acts when the user has never made
+    /// a choice (the key is absent); once they toggle it in the context menu, their
+    /// preference is respected and this never overrides it.
+    private func setupDefaultLaunchAtLogin() {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: "launchAtLogin") == nil else { return }
+
+        defaults.set(true, forKey: "launchAtLogin")
+        if #available(macOS 13.0, *) {
+            try? SMAppService.mainApp.register()
+        }
+    }
+
     private func toggleLaunchAtLogin() {
         let current = UserDefaults.standard.bool(forKey: "launchAtLogin")
         let newValue = !current
@@ -195,10 +232,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
+    private func openManageUsage() {
+        NSWorkspace.shared.open(CBLinks.manageUsage)
+    }
+
     private func showAbout() {
         let alert = NSAlert()
         alert.messageText = "ClaudeBat"
         var lines = ["Your Claude usage. One glance away."]
+        lines.append("")
+        lines.append("Tip: ⌘-click and drag the bat to move it to a different spot in the menu bar.")
         lines.append("")
         lines.append("Version \(viewModel.buildInfo.appVersion)")
         if let buildLine = viewModel.buildInfo.aboutBuildLine {

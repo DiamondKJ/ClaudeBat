@@ -230,7 +230,7 @@ public final class UsageViewModel {
 
     public func onPopoverOpen() {
         popoverIsOpen = true
-        restartPolling(reason: "popover_open")
+        restartPollingPreservingScheduledDelay(reason: "popover_open")
         recordMonitorEvent(MonitorEvent(category: .lifecycle, action: "popover_open"))
 
         let needsFetch: Bool
@@ -251,7 +251,7 @@ public final class UsageViewModel {
 
     public func onPopoverClose() {
         popoverIsOpen = false
-        restartPolling(reason: "popover_close")
+        restartPollingPreservingScheduledDelay(reason: "popover_close")
         recordMonitorEvent(MonitorEvent(category: .lifecycle, action: "popover_close"))
     }
 
@@ -814,6 +814,19 @@ public final class UsageViewModel {
         restartPolling(reason: "startup")
     }
 
+    private var remainingScheduledPollDelay: TimeInterval? {
+        guard scheduledPollDelayOverride != nil, let pollingTimer, pollingTimer.isValid else { return nil }
+        return max(1, pollingTimer.fireDate.timeIntervalSinceNow)
+    }
+
+    private func restartPollingPreservingScheduledDelay(reason: String) {
+        if let remainingDelay = remainingScheduledPollDelay {
+            restartPolling(reason: reason, after: remainingDelay)
+            return
+        }
+        restartPolling(reason: reason)
+    }
+
     private func restartPolling(reason: String) {
         restartPolling(reason: reason, after: nil)
     }
@@ -995,9 +1008,12 @@ public final class UsageViewModel {
         usage?.fiveHour.remainingInt ?? 0
     }
 
-    public var isFullyMaxed: Bool {
+    /// True when the user can't actually use Claude right now — EITHER the 5-hour
+    /// session OR the weekly limit is exhausted. Both block usage, so either one
+    /// triggers the Game Over screen.
+    public var isDepleted: Bool {
         guard let u = usage else { return false }
-        return u.fiveHour.remaining <= 0 && u.sevenDay.remaining <= 0
+        return u.fiveHour.remaining <= 0 || u.sevenDay.remaining <= 0
     }
 
     public var sessionDataNeedsRefresh: Bool {
@@ -1084,6 +1100,45 @@ public final class UsageViewModel {
 
     public var shouldShowMenuBarUsage: Bool {
         usage != nil && !sessionDataNeedsRefresh && !wakeAuthRetryPending && !isRecoveringAuth
+    }
+
+    /// Human-readable description of the current menu-bar state, surfaced as the
+    /// status-item tooltip. The menu bar collapses ~6 states into near-identical
+    /// bats; this is the only way to disambiguate them without opening the popover.
+    public var menuBarTooltip: String {
+        if isRecoveringAuth || wakeAuthRetryPending {
+            return "ClaudeBat — reconnecting after wake…"
+        }
+        if sessionDataNeedsRefresh {
+            return "ClaudeBat — refreshing after reset…"
+        }
+
+        switch popoverScreen {
+        case .loading:
+            return "ClaudeBat — loading…"
+        case .reconnectClaude:
+            return authPrompt == .reconnect ? "ClaudeBat — reconnect Claude" : "ClaudeBat — sign in to start"
+        case .offline:
+            return "ClaudeBat — offline (showing cached usage)"
+        case .error:
+            return "ClaudeBat — unable to refresh usage"
+        case .recovering:
+            return "ClaudeBat — refreshing…"
+        case .usage:
+            guard let u = usage else { return "ClaudeBat" }
+            if isDepleted {
+                if u.fiveHour.remaining <= 0 && u.sevenDay.remaining <= 0 {
+                    return "Out of usage — session & weekly limits reached"
+                }
+                let blocking = u.sevenDay.remaining <= 0 ? u.sevenDay : u.fiveHour
+                let label = u.sevenDay.remaining <= 0 ? "Weekly limit reached" : "Session limit reached"
+                if let date = blocking.resetsAtDate {
+                    return "\(label) — back \(UsagePeriod.formatResetTimestamp(date))"
+                }
+                return label
+            }
+            return "Session \(u.fiveHour.remainingInt) left · This week \(u.sevenDay.remainingInt) left"
+        }
     }
 
     public var hasNoAuth: Bool {

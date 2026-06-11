@@ -60,7 +60,7 @@ public struct UsagePopoverView: View {
                             Spacer().frame(height: 12)
                         }
 
-                        if viewModel.isFullyMaxed {
+                        if viewModel.isDepleted {
                             GameOverView(usage: usage)
                         } else {
                             NormalUsageView(usage: usage)

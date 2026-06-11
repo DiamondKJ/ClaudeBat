@@ -2,12 +2,14 @@ import SwiftUI
 
 public struct RetroContextMenu: View {
     var onToggleLaunchAtLogin: () -> Void
+    var onOpenUsage: () -> Void
     var onAbout: () -> Void
     var onQuit: () -> Void
     var launchAtLogin: Bool
 
-    public init(onToggleLaunchAtLogin: @escaping () -> Void, onAbout: @escaping () -> Void, onQuit: @escaping () -> Void, launchAtLogin: Bool) {
+    public init(onToggleLaunchAtLogin: @escaping () -> Void, onOpenUsage: @escaping () -> Void, onAbout: @escaping () -> Void, onQuit: @escaping () -> Void, launchAtLogin: Bool) {
         self.onToggleLaunchAtLogin = onToggleLaunchAtLogin
+        self.onOpenUsage = onOpenUsage
         self.onAbout = onAbout
         self.onQuit = onQuit
         self.launchAtLogin = launchAtLogin
@@ -16,6 +18,7 @@ public struct RetroContextMenu: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             menuRow("Launch at Login", trailing: launchAtLogin ? "✓" : nil, trailingIsAccent: true, action: onToggleLaunchAtLogin)
+            menuRow("Usage Settings", trailing: "↗", action: onOpenUsage)
 
             Divider().opacity(0.2).padding(.vertical, 4)
 
