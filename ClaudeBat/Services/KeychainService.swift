@@ -63,12 +63,15 @@ public struct KeychainService: TokenProvider {
     public func writeOAuthSnapshot(_ snapshot: OAuthCredentialSnapshot) -> Bool {
         var root = Self.readRawJSON() ?? [:]
         var oauth = (root["claudeAiOauth"] as? [String: Any]) ?? [:]
+        // Subscripting with a nil optional REMOVES the key — this is Claude
+        // Code's credential blob, so a partial snapshot must never strip
+        // fields it doesn't have values for.
         oauth["accessToken"] = snapshot.accessToken
-        oauth["refreshToken"] = snapshot.refreshToken
-        oauth["expiresAt"] = snapshot.expiresAt
-        oauth["scopes"] = snapshot.scopes
-        oauth["subscriptionType"] = snapshot.subscriptionType
-        oauth["rateLimitTier"] = snapshot.rateLimitTier
+        if let refreshToken = snapshot.refreshToken { oauth["refreshToken"] = refreshToken }
+        if let expiresAt = snapshot.expiresAt { oauth["expiresAt"] = expiresAt }
+        if !snapshot.scopes.isEmpty { oauth["scopes"] = snapshot.scopes }
+        if let subscriptionType = snapshot.subscriptionType { oauth["subscriptionType"] = subscriptionType }
+        if let rateLimitTier = snapshot.rateLimitTier { oauth["rateLimitTier"] = rateLimitTier }
         root["claudeAiOauth"] = oauth
 
         guard let data = try? JSONSerialization.data(withJSONObject: root, options: [.sortedKeys]),
@@ -115,27 +118,46 @@ public struct KeychainService: TokenProvider {
         return json
     }
 
+    /// Writes via `security -i` with the command supplied on stdin. Passing the
+    /// credential payload as a `-w` argv argument would expose it to any
+    /// same-user process via `ps` for the lifetime of the subprocess; stdin is
+    /// private to this pipe. `security -i` tokenizes double-quoted strings with
+    /// backslash escapes and exits nonzero when the command fails (verified
+    /// empirically — a failed delete exits 44).
     private static func writeSecurityCommand(payload: String) -> Bool {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = [
-            "add-generic-password",
-            "-U",
-            "-a", NSUserName(),
-            "-s", serviceName,
-            "-w", payload,
-        ]
+        process.arguments = ["-i"]
 
+        let stdinPipe = Pipe()
+        process.standardInput = stdinPipe
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
 
+        let command = [
+            "add-generic-password",
+            "-U",
+            "-a", quoted(NSUserName()),
+            "-s", quoted(serviceName),
+            "-w", quoted(payload),
+        ].joined(separator: " ") + "\n"
+
         do {
             try process.run()
+            stdinPipe.fileHandleForWriting.write(Data(command.utf8))
+            stdinPipe.fileHandleForWriting.closeFile()
             process.waitUntilExit()
         } catch {
             return false
         }
 
         return process.terminationStatus == 0
+    }
+
+    private static func quoted(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
     }
 }

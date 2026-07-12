@@ -427,7 +427,10 @@ public final class UsageViewModel {
             await fetchIfBudgetAllows(trigger: trigger, allowSessionPreflight: false)
             if usageValidationSucceeded(since: validationStartedAt) {
                 finishSuccessfulRecovery(trigger: trigger)
-            } else if lastFailureReason == FetchOutcome.rateLimited.rawValue || lastFailureReason == FetchOutcome.serverCooldownBlocked.rawValue {
+            } else if usageValidationIsWaitingOnBudget {
+                // Local budget / server cooldown blocked the validation fetch —
+                // the refreshed token may be fine, so wait for the next poll
+                // instead of escalating to the hidden Claude CLI.
                 isAuthRecoveryInFlight = false
                 authRecoveryPhase = .awaitingUsageValidation
                 recordMonitorEvent(
@@ -549,7 +552,7 @@ public final class UsageViewModel {
             await fetchIfBudgetAllows(trigger: trigger, allowSessionPreflight: false)
             if usageValidationSucceeded(since: validationStartedAt) {
                 finishSuccessfulRecovery(trigger: trigger)
-            } else if lastFailureReason == FetchOutcome.rateLimited.rawValue || lastFailureReason == FetchOutcome.serverCooldownBlocked.rawValue {
+            } else if usageValidationIsWaitingOnBudget {
                 isAuthRecoveryInFlight = false
                 authRecoveryPhase = .awaitingUsageValidation
             } else if lastFailureReason == FetchOutcome.decodingError.rawValue {
@@ -577,6 +580,14 @@ public final class UsageViewModel {
     private func usageValidationSucceeded(since startedAt: Date) -> Bool {
         guard let lastSuccessAt else { return false }
         return lastSuccessAt >= startedAt
+    }
+
+    /// The validation fetch was blocked by throttling (server 429/cooldown or
+    /// the local sliding-window budget) — not evidence the token is bad.
+    private var usageValidationIsWaitingOnBudget: Bool {
+        lastFailureReason == FetchOutcome.rateLimited.rawValue
+            || lastFailureReason == FetchOutcome.serverCooldownBlocked.rawValue
+            || lastFailureReason == FetchOutcome.budgetBlocked.rawValue
     }
 
     @MainActor

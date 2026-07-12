@@ -39,7 +39,7 @@ Requires macOS 14+ and [Claude Code](https://docs.anthropic.com/en/docs/claude-c
 ## What You Get
 
 - Session (5h) and weekly (7d) usage in the menu bar
-- Sonnet breakdown, extra usage spend/limit
+- Per-model weekly breakdown (Fable, Sonnet — whatever your plan reports), extra usage spend/limit
 - Auto-polls every 65s when open, 120s when closed
 - No manual refresh. It just works.
 
@@ -48,6 +48,15 @@ Requires macOS 14+ and [Claude Code](https://docs.anthropic.com/en/docs/claude-c
 Reads your Claude Code OAuth token straight from macOS Keychain — zero prompts, zero config. If you're logged into Claude Code, ClaudeBat just works.
 
 Polls the usage API on a sliding window budget, caches locally, and auto-refreshes on sleep/wake and session resets.
+
+## Privacy & Credentials
+
+Worth being explicit about, since this app touches your Claude credentials:
+
+- **Reads** your Claude Code OAuth token from the macOS Keychain (the same entry Claude Code manages).
+- **If the token has expired**, ClaudeBat refreshes it against Anthropic's official OAuth endpoint and writes the renewed credentials back to that Keychain entry — so both ClaudeBat *and* Claude Code stay logged in.
+- **As a last resort** (refresh token missing or rejected), it briefly launches the Claude CLI hidden in the background so Claude Code can repair its own login, then closes it. This happens at most once per 20 minutes, and only binaries in trusted locations are launched.
+- **Nothing leaves your machine** except requests to Anthropic (`api.anthropic.com`, `platform.claude.com`). No telemetry, no third-party servers. Diagnostic logs stay local (`~/Library/Logs/ClaudeBat/`) and never contain tokens.
 
 ## Uninstall
 
