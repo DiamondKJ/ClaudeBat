@@ -112,12 +112,26 @@ public struct UsagePopoverView: View {
             if fitsContent {
                 GeometryReader { proxy in
                     Color.clear
-                        .onAppear { measuredUsageHeight = proxy.size.height }
+                        .onAppear { recordMeasuredHeight(proxy.size.height) }
                         .onChange(of: proxy.size.height) { _, newHeight in
-                            measuredUsageHeight = newHeight
+                            recordMeasuredHeight(newHeight)
                         }
                 }
             }
+        }
+    }
+
+    /// Ignore sub-point measurement changes: resizing the popover perturbs
+    /// layout enough to re-fire the GeometryReader, and feeding jitter back
+    /// into `preferredHeight` -> NSPopover.contentSize -> layout creates an
+    /// infinite main-thread loop (froze the app at the v1.0.14 reset boundary).
+    private func recordMeasuredHeight(_ newHeight: CGFloat) {
+        guard let current = measuredUsageHeight else {
+            measuredUsageHeight = newHeight
+            return
+        }
+        if abs(current - newHeight) > 0.5 {
+            measuredUsageHeight = newHeight
         }
     }
 }
