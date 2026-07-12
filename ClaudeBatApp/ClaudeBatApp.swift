@@ -111,9 +111,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func updatePopoverSize(height: CGFloat) {
+        // No-op on sub-point differences, and never mutate the popover
+        // synchronously from inside SwiftUI's update pass (the height callback
+        // fires there): contentSize -> setFrame -> layout -> re-measure
+        // re-enters SwiftUI and can spin the main thread forever.
+        guard abs(popover.contentSize.height - height) > 0.5 else { return }
         let targetSize = NSSize(width: PopoverLayout.width, height: height)
-        popover.contentSize = targetSize
-        popover.contentViewController?.preferredContentSize = targetSize
+        DispatchQueue.main.async { [weak self] in
+            self?.popover.contentSize = targetSize
+            self?.popover.contentViewController?.preferredContentSize = targetSize
+        }
     }
 
     // MARK: - Context Menu Popover
