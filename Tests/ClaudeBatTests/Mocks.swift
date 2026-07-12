@@ -8,10 +8,13 @@ actor MockBudget: BudgetTracking {
     private var _nextAllowed: Date?
     private var _retryAfterCalled = false
 
-    init(allowRequests: Bool = true, serverCooldownActive: Bool = false, nextAllowed: Date? = nil) {
+    private let _grantLimit: Int?
+
+    init(allowRequests: Bool = true, serverCooldownActive: Bool = false, nextAllowed: Date? = nil, grantLimit: Int? = nil) {
         _allowRequests = allowRequests
         _serverCooldownActive = serverCooldownActive
         _nextAllowed = nextAllowed
+        _grantLimit = grantLimit
     }
 
     func reserveRequest(allowWindowBypass: Bool) -> BudgetReservationDecision {
@@ -19,6 +22,9 @@ actor MockBudget: BudgetTracking {
             return .blockedByServerCooldown
         }
         if !_allowRequests && !allowWindowBypass {
+            return .blockedByLocalWindow
+        }
+        if let limit = _grantLimit, _requestCount >= limit, !allowWindowBypass {
             return .blockedByLocalWindow
         }
         _requestCount += 1
