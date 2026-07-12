@@ -12,6 +12,11 @@ public struct UsagePopoverView: View {
 
     @Environment(\.dismiss) private var dismiss
 
+    // Measured natural height of the usage screen — its content varies (model
+    // breakdown rows, cached banner, game over), so a fixed constant either
+    // clips or leaves dead space that gets centered into ugly gaps.
+    @State private var measuredUsageHeight: CGFloat?
+
     public var body: some View {
         liveContent
             .onAppear {
@@ -24,8 +29,9 @@ public struct UsagePopoverView: View {
 
     private var preferredHeight: CGFloat {
         switch viewModel.popoverScreen {
-        case .usage where viewModel.shouldShowCachedBanner:
-            return CBSpacing.popupHeightWithBanner
+        case .usage:
+            return measuredUsageHeight
+                ?? (viewModel.shouldShowCachedBanner ? CBSpacing.popupHeightWithBanner : CBSpacing.popupHeight)
         default:
             return CBSpacing.popupHeight
         }
@@ -53,7 +59,7 @@ public struct UsagePopoverView: View {
                 .clipShape(RoundedRectangle(cornerRadius: CBRadius.popup))
         case .usage:
             if let usage = viewModel.usage {
-                popupChrome {
+                popupChrome(fitsContent: true) {
                     VStack(spacing: 0) {
                         if viewModel.shouldShowCachedBanner, let reason = viewModel.cachedDataReason {
                             CachedDataBanner(reason: reason)
@@ -78,20 +84,40 @@ public struct UsagePopoverView: View {
         }
     }
 
+    /// `fitsContent: true` lets the chrome hug its content and reports the
+    /// measured height back through `preferredHeight` so the NSPopover resizes
+    /// to fit; `false` keeps the fixed-height layout with vertically centered
+    /// content (error/reconnect/offline screens).
     @ViewBuilder
-    private func popupChrome<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+    private func popupChrome<Content: View>(fitsContent: Bool = false, @ViewBuilder content: () -> Content) -> some View {
         VStack(spacing: 0) {
             PopoverHeader {
                 dismiss()
             }
             .padding(.bottom, 20)
 
-            content()
-                .frame(maxHeight: .infinity)
+            if fitsContent {
+                content()
+            } else {
+                content()
+                    .frame(maxHeight: .infinity)
+            }
         }
         .padding(CBSpacing.popupPadding)
-        .frame(width: CBSpacing.popupWidth, height: preferredHeight)
+        .frame(width: CBSpacing.popupWidth)
+        .frame(height: fitsContent ? nil : preferredHeight)
         .background(CBColor.surface)
         .clipShape(RoundedRectangle(cornerRadius: CBRadius.popup))
+        .background {
+            if fitsContent {
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { measuredUsageHeight = proxy.size.height }
+                        .onChange(of: proxy.size.height) { _, newHeight in
+                            measuredUsageHeight = newHeight
+                        }
+                }
+            }
+        }
     }
 }

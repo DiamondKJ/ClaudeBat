@@ -25,4 +25,30 @@ extension UsageResponse {
     static func expiredFixture() -> UsageResponse {
         fixture(resetsAt: Date().addingTimeInterval(-60))
     }
+
+    /// Fixture carrying model-scoped weekly entries in the `limits` array,
+    /// mirroring the post-2026-07 API shape (e.g. [("Fable", 67)]).
+    static func limitsFixture(
+        fiveHourUtilization: Double = 50.0,
+        sevenDayUtilization: Double = 30.0,
+        modelLimits: [(name: String, percent: Double)]
+    ) -> UsageResponse {
+        let base = fixture(fiveHourUtilization: fiveHourUtilization, sevenDayUtilization: sevenDayUtilization)
+        let scoped = modelLimits.map { entry in
+            UsageLimit(
+                kind: "weekly_scoped",
+                group: "weekly",
+                percent: entry.percent,
+                severity: "normal",
+                resetsAt: base.sevenDay.resetsAt,
+                isActive: false,
+                scope: UsageLimitScope(model: UsageLimitScopeModel(id: nil, displayName: entry.name))
+            )
+        }
+        return UsageResponse(
+            fiveHour: base.fiveHour,
+            sevenDay: base.sevenDay,
+            limits: scoped
+        )
+    }
 }
