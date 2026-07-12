@@ -14,6 +14,11 @@ struct FetchPipelineTests {
             api: api,
             budget: MockBudget(),
             cache: MockCache(),
+            recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -40,6 +45,11 @@ struct FetchPipelineTests {
             api: api,
             budget: MockBudget(),
             cache: MockCache(),
+            recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -57,6 +67,11 @@ struct FetchPipelineTests {
             api: api,
             budget: MockBudget(),
             cache: MockCache(),
+            recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -75,6 +90,11 @@ struct FetchPipelineTests {
             api: api,
             budget: MockBudget(),
             cache: MockCache(),
+            recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -92,6 +112,11 @@ struct FetchPipelineTests {
             api: api,
             budget: MockBudget(allowRequests: false),
             cache: MockCache(),
+            recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -114,6 +139,11 @@ struct FetchPipelineTests {
             api: api,
             budget: MockBudget(allowRequests: false, serverCooldownActive: true),
             cache: cache,
+            recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -129,6 +159,11 @@ struct FetchPipelineTests {
             api: MockAPI(),
             budget: MockBudget(),
             cache: MockCache(),
+            recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -148,6 +183,11 @@ struct FetchPipelineTests {
             api: MockAPI(),
             budget: MockBudget(),
             cache: cache,
+            recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -167,6 +207,11 @@ struct FetchPipelineTests {
             api: api,
             budget: MockBudget(),
             cache: MockCache(),
+            recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -188,6 +233,11 @@ struct FetchPipelineTests {
             api: api,
             budget: MockBudget(),
             cache: cache,
+            recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -208,6 +258,11 @@ struct FetchPipelineTests {
             api: api,
             budget: budget,
             cache: MockCache(),
+            recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -247,7 +302,10 @@ struct ResetBoundaryTests {
             budget: MockBudget(allowRequests: false),
             cache: cache,
             recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
             authRefresher: MockAuthRefresher(result: .success(newFingerprint: "new-fp")),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -270,7 +328,10 @@ struct ResetBoundaryTests {
             budget: MockBudget(allowRequests: false, serverCooldownActive: true),
             cache: cache,
             recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
             authRefresher: MockAuthRefresher(result: .success(newFingerprint: "new-fp")),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -294,7 +355,10 @@ struct ResetBoundaryTests {
             budget: budget,
             cache: cache,
             recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
             authRefresher: MockAuthRefresher(result: .success(newFingerprint: "new-fp")),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -324,6 +388,8 @@ struct ResetBoundaryTests {
             recoveryStore: MockRecoveryStore(),
             monitor: monitor,
             authRefresher: MockAuthRefresher(result: .success(newFingerprint: "new-fp")),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -360,7 +426,11 @@ struct RateLimitTests {
             api: api,
             budget: budget,
             cache: MockCache(),
+            recoveryStore: MockRecoveryStore(),
             monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -390,7 +460,11 @@ struct UsageViewModelMonitoringTests {
             api: api,
             budget: MockBudget(),
             cache: cache,
+            recoveryStore: MockRecoveryStore(),
             monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             buildInfo: AppBuildInfo(appVersion: "1.0.7", buildFlavor: "local-monitor", gitCommit: "abc1234", bundleIdentifier: "com.diamondkj.claudebat"),
             startImmediately: false
         )
@@ -418,7 +492,11 @@ struct UsageViewModelMonitoringTests {
             api: api,
             budget: MockBudget(),
             cache: cache,
+            recoveryStore: MockRecoveryStore(),
             monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -445,7 +523,11 @@ struct UsageViewModelMonitoringTests {
             api: MockAPI(),
             budget: MockBudget(),
             cache: cache,
+            recoveryStore: MockRecoveryStore(),
             monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -467,7 +549,11 @@ struct UsageViewModelMonitoringTests {
             api: api,
             budget: MockBudget(allowRequests: false),
             cache: MockCache(),
+            recoveryStore: MockRecoveryStore(),
             monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -490,7 +576,11 @@ struct UsageViewModelMonitoringTests {
             api: api,
             budget: MockBudget(),
             cache: cache,
+            recoveryStore: MockRecoveryStore(),
             monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -521,7 +611,11 @@ struct UsageViewModelMonitoringTests {
             api: api,
             budget: budget,
             cache: cache,
+            recoveryStore: MockRecoveryStore(),
             monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -551,7 +645,11 @@ struct UsageViewModelMonitoringTests {
             api: api,
             budget: budget,
             cache: cache,
+            recoveryStore: MockRecoveryStore(),
             monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -582,7 +680,11 @@ struct UsageViewModelMonitoringTests {
             api: api,
             budget: budget,
             cache: cache,
+            recoveryStore: MockRecoveryStore(),
             monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -609,7 +711,11 @@ struct UsageViewModelMonitoringTests {
             api: api,
             budget: MockBudget(),
             cache: cache,
+            recoveryStore: MockRecoveryStore(),
             monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -644,6 +750,7 @@ struct UsageViewModelMonitoringTests {
             recoveryStore: MockRecoveryStore(),
             monitor: monitor,
             authRefresher: MockAuthRefresher(result: .success(newFingerprint: "new-fp")),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
             reachability: MockReachability(status: .reachable),
             startImmediately: false
         )
@@ -655,6 +762,43 @@ struct UsageViewModelMonitoringTests {
         #expect(await monitor.containsEvent(category: .auth, action: "native_refresh_succeeded"))
         #expect(await monitor.containsEvent(category: .auth, action: "usage_validation_after_refresh_failed", outcome: .decodingError))
         #expect(await monitor.containsEvent(category: .auth, action: "auth_recovery_succeeded") == false)
+    }
+
+    @MainActor
+    @Test func authRecovery_budgetBlockedValidationWaitsInsteadOfEscalating() async {
+        let api = MockAPI()
+        api.queuedResults = [.failure(UsageAPIError.httpError(401))]
+        let cache = MockCache()
+        cache.stored = Timestamped(value: .fixture(), fetchedAt: Date().addingTimeInterval(-3600))
+        let monitor = MockMonitor()
+        let tokenProvider = MockTokenProvider(
+            snapshot: OAuthCredentialSnapshot(accessToken: "tok", refreshToken: "refresh")
+        )
+
+        let vm = UsageViewModel(
+            tokenProvider: tokenProvider,
+            api: api,
+            // One grant covers the 401 fetch; the post-refresh validation
+            // fetch is then blocked by the local window.
+            budget: MockBudget(grantLimit: 1),
+            cache: cache,
+            recoveryStore: MockRecoveryStore(),
+            monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .success(newFingerprint: "new-fp")),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(status: .reachable),
+            startImmediately: false
+        )
+
+        await vm.fetchIfBudgetAllows(trigger: .pollTimer)
+        try? await Task.sleep(nanoseconds: 150_000_000)
+
+        #expect(await monitor.containsEvent(category: .auth, action: "native_refresh_succeeded"))
+        // A locally blocked validation fetch is not evidence the token is bad:
+        // no hidden Claude launch, no reconnect failure — just wait and retry.
+        #expect(await monitor.containsEvent(category: .auth, action: "claude_cli_recovery_started") == false)
+        #expect(await monitor.containsEvent(category: .auth, action: "auth_recovery_failed") == false)
+        #expect(await monitor.containsEvent(category: .auth, action: "manual_reconnect_required") == false)
     }
 
     @MainActor
@@ -747,6 +891,9 @@ struct UsageViewModelMonitoringTests {
             cache: MockCache(),
             recoveryStore: recoveryStore,
             monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -781,6 +928,7 @@ struct UsageViewModelMonitoringTests {
             recoveryStore: MockRecoveryStore(),
             monitor: monitor,
             authRefresher: MockAuthRefresher(result: .success(newFingerprint: "new-fp")),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
             reachability: MockReachability(status: .reachable),
             startImmediately: false
         )
@@ -810,7 +958,11 @@ struct UsageViewModelMonitoringTests {
             api: api,
             budget: MockBudget(),
             cache: cache,
+            recoveryStore: MockRecoveryStore(),
             monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -835,7 +987,11 @@ struct UsageViewModelMonitoringTests {
             api: api,
             budget: MockBudget(),
             cache: cache,
+            recoveryStore: MockRecoveryStore(),
             monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -861,7 +1017,11 @@ struct UsageViewModelMonitoringTests {
             api: api,
             budget: MockBudget(),
             cache: cache,
+            recoveryStore: MockRecoveryStore(),
             monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -929,7 +1089,11 @@ struct UsageViewModelMonitoringTests {
             api: MockAPI(),
             budget: MockBudget(),
             cache: MockCache(),
+            recoveryStore: MockRecoveryStore(),
             monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -947,6 +1111,10 @@ struct UsageViewModelMonitoringTests {
             api: MockAPI(),
             budget: MockBudget(),
             cache: MockCache(),
+            recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
             reachability: MockReachability(status: .unreachable),
             startImmediately: false
         )
@@ -966,6 +1134,10 @@ struct UsageViewModelMonitoringTests {
             api: api,
             budget: MockBudget(),
             cache: MockCache(),
+            recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
             reachability: MockReachability(status: .unknown),
             startImmediately: false
         )
@@ -991,6 +1163,10 @@ struct UsageViewModelPopoverRoutingTests {
             budget: MockBudget(),
             cache: cache,
             recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -1017,6 +1193,8 @@ struct UsageViewModelPopoverRoutingTests {
             recoveryStore: MockRecoveryStore(),
             monitor: monitor,
             authRefresher: MockAuthRefresher(result: .success(newFingerprint: "new-fp")),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -1042,8 +1220,10 @@ struct UsageViewModelPopoverRoutingTests {
             budget: MockBudget(),
             cache: cache,
             recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
             authRefresher: MockAuthRefresher(result: .missingRefreshToken),
             claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 
@@ -1075,7 +1255,9 @@ struct UsageViewModelPopoverRoutingTests {
             budget: MockBudget(),
             cache: cache,
             recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
             authRefresher: MockAuthRefresher(result: .success(newFingerprint: "new-fp")),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
             reachability: MockReachability(status: .reachable),
             startImmediately: false
         )
@@ -1107,7 +1289,9 @@ struct UsageViewModelPopoverRoutingTests {
             budget: MockBudget(),
             cache: cache,
             recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
             authRefresher: MockAuthRefresher(result: .success(newFingerprint: "new-fp")),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
             reachability: MockReachability(status: .reachable),
             startImmediately: false
         )
@@ -1130,6 +1314,11 @@ struct UsageViewModelPopoverRoutingTests {
             api: api,
             budget: MockBudget(),
             cache: cache,
+            recoveryStore: MockRecoveryStore(),
+            monitor: MockMonitor(),
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
             startImmediately: false
         )
 

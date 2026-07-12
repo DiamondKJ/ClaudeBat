@@ -34,9 +34,10 @@ public struct ClaudeCLIRecoveryService: ClaudeCLIRecovering {
         defer {
             if process.isRunning {
                 process.terminate()
+                let pid = process.processIdentifier
                 DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
                     if process.isRunning {
-                        process.interrupt()
+                        kill(pid, SIGKILL)
                     }
                 }
             }
@@ -67,22 +68,44 @@ public struct ClaudeCLIRecoveryService: ClaudeCLIRecovering {
 
     private static func resolveExecutable(named command: String) -> String? {
         if command.contains("/") {
-            return FileManager.default.isExecutableFile(atPath: command) ? command : nil
+            return isTrustedExecutable(command) ? command : nil
         }
 
         let pathEntries = (ProcessInfo.processInfo.environment["PATH"] ?? "")
             .split(separator: ":")
             .map(String.init)
 
-        for directory in ["/opt/homebrew/bin", "/usr/local/bin"] + pathEntries {
+        // Fixed locations first — a Finder-launched .app inherits a minimal
+        // PATH, so common user-local install dirs must be searched explicitly.
+        let home = NSHomeDirectory()
+        let fixedDirectories = [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "\(home)/.claude/local",
+            "\(home)/.npm-global/bin",
+            "\(home)/.local/bin",
+        ]
+
+        for directory in fixedDirectories + pathEntries {
             let candidate = URL(fileURLWithPath: directory)
                 .appendingPathComponent(command)
                 .path
-            if FileManager.default.isExecutableFile(atPath: candidate) {
+            if isTrustedExecutable(candidate) {
                 return candidate
             }
         }
 
         return nil
+    }
+
+    /// This binary runs invisibly with the user's full privileges, so a planted
+    /// executable must not qualify: require ownership by root or the current
+    /// user, and reject anything group- or world-writable.
+    private static func isTrustedExecutable(_ path: String) -> Bool {
+        guard FileManager.default.isExecutableFile(atPath: path) else { return false }
+        var info = stat()
+        guard stat(path, &info) == 0 else { return false }
+        guard info.st_uid == getuid() || info.st_uid == 0 else { return false }
+        return (info.st_mode & (mode_t(S_IWGRP) | mode_t(S_IWOTH))) == 0
     }
 }

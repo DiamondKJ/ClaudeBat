@@ -8,13 +8,15 @@ public struct UsageResponse: Codable {
     public let sevenDayOpus: UsagePeriod?
     public let sevenDaySonnet: UsagePeriod?
     public let extraUsage: ExtraUsage?
+    public let limits: [UsageLimit]?
 
-    public init(fiveHour: UsagePeriod, sevenDay: UsagePeriod, sevenDayOpus: UsagePeriod? = nil, sevenDaySonnet: UsagePeriod? = nil, extraUsage: ExtraUsage? = nil) {
+    public init(fiveHour: UsagePeriod, sevenDay: UsagePeriod, sevenDayOpus: UsagePeriod? = nil, sevenDaySonnet: UsagePeriod? = nil, extraUsage: ExtraUsage? = nil, limits: [UsageLimit]? = nil) {
         self.fiveHour = fiveHour
         self.sevenDay = sevenDay
         self.sevenDayOpus = sevenDayOpus
         self.sevenDaySonnet = sevenDaySonnet
         self.extraUsage = extraUsage
+        self.limits = limits
     }
 
     // API may return additional fields (seven_day_oauth_apps, seven_day_cowork, iguana_necktie, etc.)
@@ -25,10 +27,106 @@ public struct UsageResponse: Codable {
         case sevenDayOpus = "seven_day_opus"
         case sevenDaySonnet = "seven_day_sonnet"
         case extraUsage = "extra_usage"
+        case limits
+    }
+
+    /// Per-model weekly usage rows for the popover breakdown.
+    ///
+    /// Sourced from the `limits` array (model-scoped weekly entries — "Fable",
+    /// "Sonnet", whatever the API names next). Falls back to the legacy
+    /// `seven_day_opus`/`seven_day_sonnet` buckets, which the API nulled out
+    /// mid-2026 but older cached responses may still carry.
+    public var weeklyModelBreakdown: [ModelWeeklyUsage] {
+        let scoped = (limits ?? []).compactMap { limit -> ModelWeeklyUsage? in
+            guard limit.group == "weekly",
+                  let name = limit.scope?.model?.displayName,
+                  let percent = limit.percent else { return nil }
+            return ModelWeeklyUsage(
+                label: name,
+                period: UsagePeriod(utilization: percent, resetsAt: limit.resetsAt)
+            )
+        }
+        if !scoped.isEmpty { return scoped }
+
+        var legacy: [ModelWeeklyUsage] = []
+        if let opus = sevenDayOpus {
+            legacy.append(ModelWeeklyUsage(label: "Opus", period: opus))
+        }
+        if let sonnet = sevenDaySonnet {
+            legacy.append(ModelWeeklyUsage(label: "Sonnet", period: sonnet))
+        }
+        return legacy
     }
 }
 
-public struct UsagePeriod: Codable {
+/// One entry in the API's `limits` array. Only `weekly`-group entries with a
+/// model scope drive UI today, but all fields decode so future groups
+/// (session severity, surface scopes) are available without a schema change.
+public struct UsageLimit: Codable {
+    public let kind: String?
+    public let group: String?
+    public let percent: Double?
+    public let severity: String?
+    public let resetsAt: String?
+    public let isActive: Bool?
+    public let scope: UsageLimitScope?
+
+    public init(kind: String? = nil, group: String? = nil, percent: Double? = nil, severity: String? = nil, resetsAt: String? = nil, isActive: Bool? = nil, scope: UsageLimitScope? = nil) {
+        self.kind = kind
+        self.group = group
+        self.percent = percent
+        self.severity = severity
+        self.resetsAt = resetsAt
+        self.isActive = isActive
+        self.scope = scope
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case group
+        case percent
+        case severity
+        case resetsAt = "resets_at"
+        case isActive = "is_active"
+        case scope
+    }
+}
+
+public struct UsageLimitScope: Codable {
+    public let model: UsageLimitScopeModel?
+
+    public init(model: UsageLimitScopeModel? = nil) {
+        self.model = model
+    }
+}
+
+public struct UsageLimitScopeModel: Codable {
+    public let id: String?
+    public let displayName: String?
+
+    public init(id: String? = nil, displayName: String? = nil) {
+        self.id = id
+        self.displayName = displayName
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case displayName = "display_name"
+    }
+}
+
+/// A labeled per-model weekly usage row, ready for display.
+public struct ModelWeeklyUsage: Equatable {
+    public let label: String
+    public let period: UsagePeriod
+
+    public init(label: String, period: UsagePeriod) {
+        self.label = label
+        self.period = period
+    }
+}
+
+public struct UsagePeriod: Codable, Equatable {
     /// Percentage USED (0-100)
     public let utilization: Double
     public let resetsAt: String?

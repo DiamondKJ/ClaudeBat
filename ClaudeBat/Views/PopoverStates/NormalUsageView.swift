@@ -71,22 +71,30 @@ struct NormalUsageView: View {
                         size: .medium
                     )
 
-                    // Match Sonnet row's trailing label width so bars right-align
+                    // Balance the leading number column so the weekly bar and
+                    // the model-row bars share the same left edge
                     Color.clear.frame(width: 50)
                 }
             }
 
-            // Model breakdown — shown only when the API actually returns Sonnet data.
-            // nil must NOT coalesce to 0 (that paints a fake red "maxed" row identical
-            // to a genuinely exhausted tier).
-            if let sonnet = usage.sevenDaySonnet {
-                Spacer().frame(height: 12)
+            // Model breakdown — one row per model-scoped weekly limit (Fable,
+            // Sonnet, ...), sourced from the API's `limits` array with legacy
+            // seven_day_sonnet/opus fallback. Absent data must NOT coalesce to 0
+            // (that paints a fake red "maxed" row identical to a genuinely
+            // exhausted tier).
+            let modelBreakdown = usage.weeklyModelBreakdown
+            if !modelBreakdown.isEmpty {
+                Spacer().frame(height: 16)
 
-                ModelBreakdownRow(
-                    label: "Sonnet",
-                    remaining: sonnet.remaining,
-                    isMaxed: sonnet.remaining <= 0
-                )
+                VStack(spacing: 6) {
+                    ForEach(modelBreakdown, id: \.label) { entry in
+                        ModelBreakdownRow(
+                            label: entry.label,
+                            remaining: entry.period.remaining,
+                            isMaxed: entry.period.remaining <= 0
+                        )
+                    }
+                }
             }
 
             // Extra usage section — only when enabled

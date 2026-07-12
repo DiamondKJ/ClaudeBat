@@ -20,10 +20,15 @@ struct ModelBreakdownRow: View {
                 fillColor: isMaxed ? CBColor.batteryCritical : CBColor.accent
             )
 
+            // Leading-aligned so the number hugs the bar; the trailing spacer
+            // left-packs the row, keeping the label column and bar left edges
+            // aligned with the weekly row above.
             Text(isMaxed ? "" : "\(Int(remaining.rounded()))")
                 .font(CBFont.modelNumber)
                 .foregroundStyle(isMaxed ? CBColor.batteryCritical : CBColor.textPrimary)
-                .frame(width: 50, alignment: .trailing)
+                .frame(width: 50, alignment: .leading)
+
+            Spacer(minLength: 0)
         }
     }
 }
