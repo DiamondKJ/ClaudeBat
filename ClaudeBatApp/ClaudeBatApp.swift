@@ -29,6 +29,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var contextPopover: NSPopover!
     private let viewModel = UsageViewModel()
     private var eventMonitor: Any?
+    // Last height SwiftUI reported for the popover content. Reused when
+    // reopening: the view stays attached across open/close, so its measurement
+    // callbacks don't re-fire on a re-show — resetting to the layout constants
+    // here would reintroduce the fixed-height dead space.
+    private var lastReportedPopoverHeight: CGFloat?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         FontRegistration.registerFonts()
@@ -97,6 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             rootView: UsagePopoverView(
                 viewModel: viewModel,
                 onPreferredHeightChange: { [weak self] height in
+                    self?.lastReportedPopoverHeight = height
                     self?.updatePopoverSize(height: height)
                 }
             )
@@ -177,7 +183,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 popover.performClose(nil)
             } else {
                 closeAllPopovers()
-                updatePopoverSize(height: viewModel.shouldShowCachedBanner ? PopoverLayout.bannerHeight : PopoverLayout.baseHeight)
+                let fallback = viewModel.shouldShowCachedBanner ? PopoverLayout.bannerHeight : PopoverLayout.baseHeight
+                updatePopoverSize(height: lastReportedPopoverHeight ?? fallback)
                 popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
             }
         }

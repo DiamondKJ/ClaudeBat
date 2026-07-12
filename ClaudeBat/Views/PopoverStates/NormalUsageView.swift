@@ -54,7 +54,7 @@ struct NormalUsageView: View {
             Spacer().frame(height: 20)
 
             // Weekly section
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 16) {
                 SectionHeader(
                     title: "THIS WEEK",
                     subtitle: usage.sevenDay.resetDateShort
