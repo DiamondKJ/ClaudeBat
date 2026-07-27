@@ -77,6 +77,9 @@ final class MockAPI: UsageFetching, @unchecked Sendable {
 
 final class MockTokenProvider: TokenProvider, @unchecked Sendable {
     var snapshot: OAuthCredentialSnapshot?
+    /// Which store a resolved credential is reported as coming from. Only affects
+    /// the `credential_source` observability field.
+    var source: CredentialSource = .credentialsFile
 
     init(token: String? = nil, snapshot: OAuthCredentialSnapshot? = nil) {
         if let snapshot {
@@ -96,6 +99,8 @@ final class MockTokenProvider: TokenProvider, @unchecked Sendable {
         return true
     }
     func tokenFingerprint() -> String? { snapshot?.fingerprint }
+    func credentialSource() -> CredentialSource? { snapshot == nil ? nil : source }
+    var storeExists: Bool { snapshot != nil }
 }
 
 final class MockCache: UsageCaching, @unchecked Sendable {

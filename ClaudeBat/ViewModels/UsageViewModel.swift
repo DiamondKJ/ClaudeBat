@@ -82,6 +82,8 @@ public final class UsageViewModel {
     private var authRecoveryResult: AuthRecoveryResult?
     private var isAuthRecoveryInFlight = false
     private var credentialSnapshot: OAuthCredentialSnapshot?
+    private var credentialSource: CredentialSource?
+    private var hasObservedCredentialSource = false
 
     private static let basePollOpen: TimeInterval = 65
     private static let basePollClosed: TimeInterval = 120
@@ -145,7 +147,7 @@ public final class UsageViewModel {
     // MARK: - Init
 
     public init(
-        tokenProvider: any TokenProvider = KeychainService(),
+        tokenProvider: any TokenProvider = CredentialStore(),
         api: any UsageFetching = UsageAPIService(),
         budget: any BudgetTracking = SlidingWindowBudget(),
         cache: any UsageCaching = UsageCache(),
@@ -699,6 +701,37 @@ public final class UsageViewModel {
             MonitorEvent(category: .fetch, action: "started", trigger: trigger, message: "begin fetch attempt")
         )
 
+        // Check credentials BEFORE reserving budget. `SlidingWindowBudget` has no
+        // release API, so a reservation spent on a fetch that can't happen is gone
+        // for the whole 300s window. When Claude Code moved its credentials out of
+        // the Keychain (mid-2026) this ordering turned a recoverable `no_token` into
+        // a self-inflicted `budget_blocked` cascade within five polls.
+        guard let token = credentialSnapshot?.accessToken, !token.isEmpty else {
+            lastFailureAt = Date()
+            lastFailureReason = FetchOutcome.noToken.rawValue
+            lastHTTPStatus = nil
+            lastRetryAfterSeconds = nil
+            if usage == nil {
+                freshness = .empty
+                errorMessage = nil
+                setCachedDataReason(nil)
+            } else {
+                freshness = .stale
+                setCachedDataReason(.noToken)
+            }
+
+            recordMonitorEvent(
+                MonitorEvent(
+                    category: .auth,
+                    action: "missing_token",
+                    trigger: trigger,
+                    outcome: .noToken,
+                    message: "no OAuth credentials in any store"
+                )
+            )
+            return
+        }
+
         let budgetDecision = await budget.reserveRequest(allowWindowBypass: trigger == .resetBoundary)
         if budgetDecision != .granted {
             let serverBlocked = budgetDecision == .blockedByServerCooldown
@@ -720,32 +753,6 @@ public final class UsageViewModel {
                         ? "server retry-after still active"
                         : "local sliding-window budget exhausted",
                     retryAfterSeconds: serverBlocked ? nextDelay : nil
-                )
-            )
-            return
-        }
-
-        guard let token = credentialSnapshot?.accessToken, !token.isEmpty else {
-            lastFailureAt = Date()
-            lastFailureReason = FetchOutcome.noToken.rawValue
-            lastHTTPStatus = nil
-            lastRetryAfterSeconds = nil
-            if usage == nil {
-                freshness = .empty
-                errorMessage = nil
-                setCachedDataReason(nil)
-            } else {
-                freshness = .stale
-                setCachedDataReason(.noToken)
-            }
-
-            recordMonitorEvent(
-                MonitorEvent(
-                    category: .auth,
-                    action: "missing_token",
-                    trigger: trigger,
-                    outcome: .noToken,
-                    message: "keychain token unavailable"
                 )
             )
             return
@@ -1518,6 +1525,36 @@ public final class UsageViewModel {
 
     private func refreshCredentialState() {
         credentialSnapshot = tokenProvider.readOAuthSnapshot()
+
+        // Record which store the credentials actually came from, but only when it
+        // changes — this runs on every poll. Claude Code's mid-2026 move off the
+        // Keychain cost hours of stale data precisely because nothing said where the
+        // app had looked.
+        let resolved = tokenProvider.credentialSource()
+        let previous = credentialSource
+        let isTransition = !hasObservedCredentialSource || resolved != previous
+        credentialSource = resolved
+        hasObservedCredentialSource = true
+
+        guard isTransition else { return }
+
+        if let resolved {
+            recordMonitorEvent(
+                MonitorEvent(
+                    category: .auth,
+                    action: "credential_source_changed",
+                    message: "\(previous?.rawValue ?? "none") -> \(resolved.rawValue)"
+                )
+            )
+        } else {
+            recordMonitorEvent(
+                MonitorEvent(
+                    category: .auth,
+                    action: "credential_source_unavailable",
+                    message: "no credentials in any store (\(tokenProvider.credentialProbeSummary()))"
+                )
+            )
+        }
     }
 
     private func networkErrorMessage() -> String {
@@ -1568,7 +1605,8 @@ public final class UsageViewModel {
             authRecoveryPhase: authRecoveryPhase,
             authRecoveryResult: authRecoveryResult,
             lastRecoveryAttemptAt: recoverySnapshot.lastRecoveryAttemptAt,
-            lastHiddenClaudeActivationAt: recoverySnapshot.lastHiddenClaudeActivationAt
+            lastHiddenClaudeActivationAt: recoverySnapshot.lastHiddenClaudeActivationAt,
+            credentialSource: credentialSource
         )
     }
 }

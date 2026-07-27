@@ -103,6 +103,7 @@ public struct MonitorStatus: Codable, Equatable, Sendable {
     public var authRecoveryResult: AuthRecoveryResult?
     public var lastRecoveryAttemptAt: Date?
     public var lastHiddenClaudeActivationAt: Date?
+    public var credentialSource: CredentialSource?
 
     public init(
         pid: Int32 = ProcessInfo.processInfo.processIdentifier,
@@ -133,7 +134,8 @@ public struct MonitorStatus: Codable, Equatable, Sendable {
         authRecoveryPhase: AuthRecoveryPhase? = nil,
         authRecoveryResult: AuthRecoveryResult? = nil,
         lastRecoveryAttemptAt: Date? = nil,
-        lastHiddenClaudeActivationAt: Date? = nil
+        lastHiddenClaudeActivationAt: Date? = nil,
+        credentialSource: CredentialSource? = nil
     ) {
         self.pid = pid
         self.appRunning = appRunning
@@ -164,6 +166,7 @@ public struct MonitorStatus: Codable, Equatable, Sendable {
         self.authRecoveryResult = authRecoveryResult
         self.lastRecoveryAttemptAt = lastRecoveryAttemptAt
         self.lastHiddenClaudeActivationAt = lastHiddenClaudeActivationAt
+        self.credentialSource = credentialSource
     }
 
     enum CodingKeys: String, CodingKey {
@@ -196,6 +199,7 @@ public struct MonitorStatus: Codable, Equatable, Sendable {
         case authRecoveryResult = "auth_recovery_result"
         case lastRecoveryAttemptAt = "last_recovery_attempt_at"
         case lastHiddenClaudeActivationAt = "last_hidden_claude_activation_at"
+        case credentialSource = "credential_source"
     }
 }
 
@@ -240,6 +244,7 @@ public struct MonitorEventRecord: Codable, Sendable {
     public let authRecoveryResult: String?
     public let lastRecoveryAttemptAt: Date?
     public let lastHiddenClaudeActivationAt: Date?
+    public let credentialSource: String?
 
     public init(event: MonitorEvent, status: MonitorStatus, buildInfo: AppBuildInfo, timestamp: Date = Date()) {
         self.timestamp = timestamp
@@ -282,6 +287,7 @@ public struct MonitorEventRecord: Codable, Sendable {
         self.authRecoveryResult = status.authRecoveryResult?.rawValue
         self.lastRecoveryAttemptAt = status.lastRecoveryAttemptAt
         self.lastHiddenClaudeActivationAt = status.lastHiddenClaudeActivationAt
+        self.credentialSource = status.credentialSource?.rawValue
     }
 
     public var logLevel: OSLogType {
@@ -314,6 +320,7 @@ public struct MonitorEventRecord: Codable, Sendable {
             "poll=\(currentPollIntervalSeconds)",
             "auth_phase=\(authRecoveryPhase ?? "-")",
             "auth_result=\(authRecoveryResult ?? "-")",
+            "cred_source=\(credentialSource ?? "-")",
             "message=\(message ?? "-")",
         ]
         return fields.joined(separator: " ")
@@ -360,5 +367,6 @@ public struct MonitorEventRecord: Codable, Sendable {
         case authRecoveryResult = "auth_recovery_result"
         case lastRecoveryAttemptAt = "last_recovery_attempt_at"
         case lastHiddenClaudeActivationAt = "last_hidden_claude_activation_at"
+        case credentialSource = "credential_source"
     }
 }

@@ -15,66 +15,14 @@ public struct KeychainService: TokenProvider {
 
     public func readOAuthSnapshot() -> OAuthCredentialSnapshot? {
         guard let raw = Self.runSecurityCommand() else { return nil }
-
-        guard let data = raw.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            return token.isEmpty ? nil : OAuthCredentialSnapshot(accessToken: token)
-        }
-
-        if let oauth = json["claudeAiOauth"] as? [String: Any],
-           let token = oauth["accessToken"] as? String {
-            let expiresAt: Int64?
-            if let number = oauth["expiresAt"] as? NSNumber {
-                expiresAt = number.int64Value
-            } else if let string = oauth["expiresAt"] as? String, let value = Int64(string) {
-                expiresAt = value
-            } else {
-                expiresAt = nil
-            }
-
-            let scopes: [String]
-            if let scopeString = oauth["scopes"] as? String {
-                scopes = scopeString.split(separator: " ").map(String.init)
-            } else if let scopeArray = oauth["scopes"] as? [String] {
-                scopes = scopeArray
-            } else {
-                scopes = []
-            }
-
-            return OAuthCredentialSnapshot(
-                accessToken: token,
-                refreshToken: oauth["refreshToken"] as? String,
-                expiresAt: expiresAt,
-                scopes: scopes,
-                subscriptionType: oauth["subscriptionType"] as? String,
-                rateLimitTier: oauth["rateLimitTier"] as? String
-            )
-        }
-
-        if let token = json["access_token"] as? String {
-            return OAuthCredentialSnapshot(accessToken: token)
-        }
-
-        return nil
+        return CredentialBlobCodec.snapshot(fromRawString: raw)
     }
 
     @discardableResult
     public func writeOAuthSnapshot(_ snapshot: OAuthCredentialSnapshot) -> Bool {
-        var root = Self.readRawJSON() ?? [:]
-        var oauth = (root["claudeAiOauth"] as? [String: Any]) ?? [:]
-        // Subscripting with a nil optional REMOVES the key — this is Claude
-        // Code's credential blob, so a partial snapshot must never strip
-        // fields it doesn't have values for.
-        oauth["accessToken"] = snapshot.accessToken
-        if let refreshToken = snapshot.refreshToken { oauth["refreshToken"] = refreshToken }
-        if let expiresAt = snapshot.expiresAt { oauth["expiresAt"] = expiresAt }
-        if !snapshot.scopes.isEmpty { oauth["scopes"] = snapshot.scopes }
-        if let subscriptionType = snapshot.subscriptionType { oauth["subscriptionType"] = subscriptionType }
-        if let rateLimitTier = snapshot.rateLimitTier { oauth["rateLimitTier"] = rateLimitTier }
-        root["claudeAiOauth"] = oauth
+        let root = CredentialBlobCodec.merged(snapshot, into: Self.readRawJSON() ?? [:])
 
-        guard let data = try? JSONSerialization.data(withJSONObject: root, options: [.sortedKeys]),
+        guard let data = CredentialBlobCodec.serialize(root),
               let payload = String(data: data, encoding: .utf8) else {
             return false
         }
@@ -84,6 +32,21 @@ public struct KeychainService: TokenProvider {
 
     public func tokenFingerprint() -> String? {
         readOAuthSnapshot()?.fingerprint
+    }
+
+    public func credentialSource() -> CredentialSource? {
+        readOAuthSnapshot() == nil ? nil : .keychain
+    }
+
+    /// Whether the backing store exists at all, independent of whether it holds a
+    /// usable credential. `CredentialStore` uses this to decide where a write
+    /// should land when no source currently resolves.
+    public var storeExists: Bool {
+        Self.runSecurityCommand() != nil
+    }
+
+    public func credentialProbeSummary() -> String {
+        "\(CredentialSource.keychain.rawValue)=\(storeExists ? "present" : "absent")"
     }
 
     private static func runSecurityCommand() -> String? {
@@ -109,13 +72,8 @@ public struct KeychainService: TokenProvider {
     }
 
     private static func readRawJSON() -> [String: Any]? {
-        guard let raw = runSecurityCommand(),
-              let data = raw.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
-        }
-
-        return json
+        guard let raw = runSecurityCommand() else { return nil }
+        return CredentialBlobCodec.jsonObject(fromRawString: raw)
     }
 
     /// Writes via `security -i` with the command supplied on stdin. Passing the

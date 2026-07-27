@@ -18,6 +18,16 @@ public protocol TokenProvider {
     @discardableResult
     func writeOAuthSnapshot(_ snapshot: OAuthCredentialSnapshot) -> Bool
     func tokenFingerprint() -> String?
+    /// Which store the credentials came from, or nil when none resolved.
+    /// Observability only — nothing branches on this.
+    func credentialSource() -> CredentialSource?
+    /// Whether the backing store exists at all, independent of whether it holds a
+    /// usable credential. `CredentialStore` uses this to route a write when no
+    /// source currently resolves.
+    var storeExists: Bool { get }
+    /// Human-readable account of which stores were probed and whether each exists.
+    /// "no token" is far less actionable than "no token, and the file isn't there".
+    func credentialProbeSummary() -> String
 }
 
 public protocol UsageFetching {
@@ -78,5 +88,17 @@ public extension TokenProvider {
 
     func tokenFingerprint() -> String? {
         readOAuthSnapshot()?.fingerprint
+    }
+
+    func credentialSource() -> CredentialSource? {
+        nil
+    }
+
+    var storeExists: Bool {
+        readOAuthSnapshot() != nil
+    }
+
+    func credentialProbeSummary() -> String {
+        "store=\(storeExists ? "present" : "absent")"
     }
 }

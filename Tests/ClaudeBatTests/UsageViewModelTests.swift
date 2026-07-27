@@ -538,6 +538,108 @@ struct UsageViewModelMonitoringTests {
         #expect(await monitor.containsEvent(category: .auth, action: "missing_token", outcome: .noToken))
     }
 
+    /// Regression: the missing-token guard used to sit *after* `reserveRequest`, so
+    /// every tokenless poll silently spent one of five slots in the 300s window.
+    /// `SlidingWindowBudget` has no release API, so those slots were gone — a
+    /// credential outage degraded itself from `no_token` into `budget_blocked` within
+    /// five polls and stayed there.
+    @MainActor
+    @Test func tokenMissing_doesNotConsumeBudget() async {
+        let cache = MockCache()
+        cache.stored = Timestamped(value: .fixture(), fetchedAt: Date())
+        let budget = MockBudget()
+        let monitor = MockMonitor()
+
+        let vm = UsageViewModel(
+            tokenProvider: MockTokenProvider(token: nil),
+            api: MockAPI(),
+            budget: budget,
+            cache: cache,
+            recoveryStore: MockRecoveryStore(),
+            monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
+            startImmediately: false
+        )
+
+        for _ in 0..<6 {
+            await vm.fetchIfBudgetAllows(trigger: .pollTimer)
+        }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(await budget.getRequestCount() == 0)
+        // Still reports honestly rather than degrading into a budget failure.
+        let status = await monitor.latestStatus()
+        #expect(status?.lastFailureReason == FetchOutcome.noToken.rawValue)
+        #expect(vm.cachedDataReason == .noToken)
+        #expect(await monitor.containsEvent(category: .auth, action: "missing_token", outcome: .noToken))
+        #expect(!(await monitor.containsEvent(category: .fetch, action: "blocked", outcome: .budgetBlocked)))
+    }
+
+    @MainActor
+    @Test func monitorStatusReportsCredentialSource() async {
+        let api = MockAPI()
+        api.response = .fixture()
+        let monitor = MockMonitor()
+        let tokenProvider = MockTokenProvider(token: "tok")
+        tokenProvider.source = .credentialsFile
+
+        let vm = UsageViewModel(
+            tokenProvider: tokenProvider,
+            api: api,
+            budget: MockBudget(),
+            cache: MockCache(),
+            recoveryStore: MockRecoveryStore(),
+            monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
+            startImmediately: false
+        )
+
+        await vm.fetchIfBudgetAllows(trigger: .pollTimer)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(await monitor.latestStatus()?.credentialSource == .credentialsFile)
+        #expect(await monitor.containsEvent(category: .auth, action: "credential_source_changed"))
+    }
+
+    /// The event that would have diagnosed the mid-2026 Keychain migration in one
+    /// glance instead of an hour of log archaeology. Must fire once per transition,
+    /// not once per poll — this runs every 65-120s for the life of the process.
+    @MainActor
+    @Test func credentialSourceUnavailable_emitsOncePerTransition() async {
+        let cache = MockCache()
+        cache.stored = Timestamped(value: .fixture(), fetchedAt: Date())
+        let monitor = MockMonitor()
+
+        let vm = UsageViewModel(
+            tokenProvider: MockTokenProvider(token: nil),
+            api: MockAPI(),
+            budget: MockBudget(),
+            cache: cache,
+            recoveryStore: MockRecoveryStore(),
+            monitor: monitor,
+            authRefresher: MockAuthRefresher(result: .missingRefreshToken),
+            claudeCLIRecoverer: MockClaudeCLIRecoverer(result: .launchFailed("not found")),
+            reachability: MockReachability(),
+            startImmediately: false
+        )
+
+        for _ in 0..<5 {
+            await vm.fetchIfBudgetAllows(trigger: .pollTimer)
+        }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(await monitor.countEvents(category: .auth, action: "credential_source_unavailable") == 1)
+        let event = await monitor.allRecords()
+            .first { $0.event.action == "credential_source_unavailable" }?
+            .event
+        #expect(event?.message?.contains("store=absent") == true)
+        #expect(await monitor.latestStatus()?.credentialSource == nil)
+    }
+
     @MainActor
     @Test func budgetBlocked_recordsBlockedFetchEvent() async {
         let api = MockAPI()

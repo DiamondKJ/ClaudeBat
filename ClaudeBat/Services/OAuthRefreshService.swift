@@ -21,7 +21,7 @@ public struct OAuthRefreshService: AuthRefreshing {
     private let session: URLSession
 
     public init(
-        tokenProvider: any TokenProvider = KeychainService(),
+        tokenProvider: any TokenProvider = CredentialStore(),
         session: URLSession = .shared
     ) {
         self.tokenProvider = tokenProvider

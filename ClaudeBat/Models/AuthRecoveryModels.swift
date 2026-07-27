@@ -40,6 +40,16 @@ public struct OAuthCredentialSnapshot: Codable, Equatable, Sendable {
     }
 }
 
+/// Which store the OAuth credentials were actually resolved from.
+///
+/// Recorded purely for observability. Claude Code migrated from the Keychain to
+/// `~/.claude/.credentials.json` mid-2026 and the app silently served stale data
+/// for hours because nothing in the status snapshot said *where* it had looked.
+public enum CredentialSource: String, Codable, Equatable, Sendable {
+    case credentialsFile = "credentials_file"
+    case keychain
+}
+
 public enum SessionClassifierDecision: String, Codable, Equatable, Sendable {
     case fetchUsageNormally = "fetch_usage_normally"
     case refreshAuthThenFetch = "refresh_auth_then_fetch"
