@@ -1,6 +1,6 @@
 # ClaudeBat Popover Sizing Fix Plan
 
-Status: Revised after three adversarial rounds (36 reviews), then executed locally. F0, local G1-G4, I0, and local I1 are green on `codex/popover-sizing-fix`. The local test build passed hands-on review, and the maintainer explicitly authorized the GitHub flow and `v1.0.17` release on 2026-08-14. The incomplete E0-R runtime/display matrix remains recorded as accepted release risk, not passing evidence.
+Status: Revised after three adversarial rounds (36 reviews), then executed locally. F0, local G1-G4, I0, and local I1 are green. The local test build passed hands-on review. Packaging `v1.0.17` exposed an Xcode 15.4 compatibility failure before any GitHub Release was created; the tag remains immutable, and a focused macOS 14 compatibility correction is proceeding as `v1.0.18`. The incomplete E0-R runtime/display matrix remains recorded as accepted release risk, not passing evidence.
 
 ## Status dashboard
 
@@ -19,19 +19,19 @@ This table is the sole authoritative status source. A skipped test or missing ru
 | I0 Shipping-path implementation | **implemented locally** | G1-G4 + D3/D4 passed | `artifacts/popover-sizing/I0-cutover-manifest.md` | Implementer | Maintainer | Fix or revert I0 |
 | I1 Real-app integration | **passed locally; E0-R/soak pending** | I0 | `artifacts/popover-sizing/I1-local-verification.md` | Implementer | Maintainer | Fix or revert I0 |
 | T1 Local test installation | **passed; running** | local I1 + user approval | `artifacts/popover-sizing/T1-local-test-install.md` | Implementer | User | Restore retained backup |
-| R1 Merge/release | **authorized; v1.0.17 in progress** | I1 + maintainer risk acceptance | final-SHA build/test/source-audit report | Maintainer | User | Stop on failed checks |
+| R1 Merge/release | **v1.0.17 packaging failed; v1.0.18 correction authorized** | I1 + maintainer risk acceptance | final-SHA build/test/source-audit report | Maintainer | User | Stop on failed checks |
 | R2 Released-app installation | **pending R1** | R1 | explicit user approval | User | User | Keep verified test build installed |
 
 Local E0 is green with per-command `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`: Xcode 26.6, 157 regular tests, all opt-in G1-G4 suites, Debug and Release builds, and one live 2x AppKit display pass. The machine-wide `xcode-select` remains unchanged by design.
 
-Current next action: publish the reviewed branch, merge it, rerun final checks on the merged commit, and tag `v1.0.17`. Missing macOS 14/15, Intel, physical 1x, and long-soak evidence remain unresolved follow-up work and must not be represented as passed.
+Current next action: prove the final-root geometry observer on the local GUI harness and on the GitHub macOS 14 build gate, then publish the corrected release as a new immutable `v1.0.18` tag. Missing macOS 15, Intel, physical 1x, and long-soak evidence remain unresolved follow-up work and must not be represented as passed.
 
 ## Decision register
 
 | ID | Decision | Candidates | Status | Evidence |
 |---|---|---|---|---|
 | D1 | Synchronous measurement | forced layout + preferred value; finite `sizeThatFits` | selected: native tracking off + finite `sizeThatFits` | `artifacts/popover-sizing/G4-lifecycle-ledger.md` |
-| D2 | Live invalidation signal | native callback; final-root geometry/preference; other proven signal | selected locally: final-root `onGeometryChange` | `artifacts/popover-sizing/G2-signal-results.json` |
+| D2 | Live invalidation signal | native callback; final-root geometry/preference; other proven signal | selected locally: final-root background `GeometryReader` size observer | `artifacts/popover-sizing/G2-signal-results.json` |
 | D3 | Duplicate model identity | retain; stable API/index identity | selected: API model ID + deterministic fallback | `artifacts/popover-sizing/D3-model-identity.md` |
 | D4 | Overflow handling | defer beyond envelope; include clamp/scroll | defer beyond envelope; E0-R small-display evidence pending | `artifacts/popover-sizing/D4-overflow-decision.md` |
 | D5 | Supported runtime/hardware matrix | macOS/architecture/display tuples | local 2x arm64 recorded; E0-R pending | `artifacts/popover-sizing/E0-environment.md` |
