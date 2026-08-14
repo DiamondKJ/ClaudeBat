@@ -13,8 +13,13 @@
     "initial_callbacks": 0,
     "changed_size_callbacks": 0
   },
-  "selected_candidate": {
+  "compatibility_rejection": {
     "name": "onGeometryChange for CGSize on the final root",
+    "result": "rejected_after_local_characterization",
+    "reason": "The GitHub macOS 14 runner uses Xcode 15.4, whose SwiftUI SDK does not provide onGeometryChange. The v1.0.17 packaging workflow failed before release creation."
+  },
+  "selected_candidate": {
+    "name": "background GeometryReader observing CGSize on the final root",
     "native_preferred_size_tracking": false,
     "normal_shape_cycles": 100,
     "additional_size_changes": 12,

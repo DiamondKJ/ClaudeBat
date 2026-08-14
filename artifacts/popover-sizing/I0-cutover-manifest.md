@@ -16,7 +16,7 @@ Added active behavior:
 
 - allocation-independent normal/header-baseline/standalone roots;
 - display-only deterministic clock/timezone/install seams;
-- final-root `onGeometryChange` invalidation (value discarded);
+- final-root background `GeometryReader` size invalidation (value discarded);
 - session-token `PopoverSizeCoordinator`;
 - shared `PopoverPresentationDriver` for AppDelegate and G4;
 - synchronous finite preflight before show;

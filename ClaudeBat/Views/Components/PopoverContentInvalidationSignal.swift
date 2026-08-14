@@ -17,14 +17,25 @@ struct PopoverContentInvalidationSignal<Content: View>: View {
 
     var body: some View {
         content
-            .onGeometryChange(for: CGSize.self) { proxy in
-                proxy.size
-            } action: { size in
-                guard size.width.isFinite,
-                      size.height.isFinite,
-                      size.width > 0,
-                      size.height > 0 else { return }
-                onContentInvalidated()
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear {
+                            reportIfValid(proxy.size)
+                        }
+                        .onChange(of: proxy.size) { _, newSize in
+                            reportIfValid(newSize)
+                        }
+                }
             }
+    }
+
+    @MainActor
+    private func reportIfValid(_ size: CGSize) {
+        guard size.width.isFinite,
+              size.height.isFinite,
+              size.width > 0,
+              size.height > 0 else { return }
+        onContentInvalidated()
     }
 }

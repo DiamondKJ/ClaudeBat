@@ -161,7 +161,7 @@ private enum SignalPopoverHarness {
 )
 struct PopoverSignalCharacterizationTests {
     @MainActor
-    @Test func finalRootPreferenceSignalsRealShapeChangesWithoutStableChurn() async throws {
+    @Test func finalRootGeometrySignalsRealShapeChangesWithoutStableChurn() async throws {
         FontRegistration.registerFonts(searchingFrom: Bundle(for: PopoverSignalTestBundleMarker.self).bundleURL)
         let model = SignalFixtureModel()
         let ledger = SignalLedger()
