@@ -13,6 +13,8 @@ The live invalidation seam now observes the final root with a background `Geomet
 
 A new pull-request workflow builds the universal app bundle on `macos-14`. This makes the exact release-runner product compilation a pre-merge check instead of discovering SDK incompatibility after a tag is pushed.
 
+The workflow's first pull-request run also showed that Xcode 15.4 does not infer main-actor isolation for the geometry helper as newer Xcode does. The helper now carries an explicit `@MainActor` annotation; this is an isolation declaration only and does not change callback behavior.
+
 The corrected release will use the new immutable `v1.0.18` tag only after local signal characterization, the full local suite, release compilation, and the GitHub macOS 14 compatibility build are green.
 
 ## Local verification

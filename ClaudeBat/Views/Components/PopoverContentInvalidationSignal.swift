@@ -30,6 +30,7 @@ struct PopoverContentInvalidationSignal<Content: View>: View {
             }
     }
 
+    @MainActor
     private func reportIfValid(_ size: CGSize) {
         guard size.width.isFinite,
               size.height.isFinite,
