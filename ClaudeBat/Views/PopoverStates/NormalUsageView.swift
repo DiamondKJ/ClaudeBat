@@ -2,11 +2,18 @@ import SwiftUI
 
 struct NormalUsageView: View {
     let usage: UsageResponse
+    @Environment(\.popoverDisplayEnvironment) private var displayEnvironment
 
     var body: some View {
-        // TimelineView ticks every 60s so countdowns stay live
-        TimelineView(.periodic(from: .now, by: 60.0)) { _ in
-            content
+        Group {
+            if displayEnvironment.fixedNow != nil {
+                content
+            } else {
+                // TimelineView ticks every 60s so countdowns stay live
+                TimelineView(.periodic(from: .now, by: 60.0)) { _ in
+                    content
+                }
+            }
         }
     }
 
@@ -16,7 +23,10 @@ struct NormalUsageView: View {
             VStack(alignment: .leading, spacing: 8) {
                 SectionHeader(
                     title: "SESSION",
-                    subtitle: usage.fiveHour.timeUntilReset
+                    subtitle: usage.fiveHour.timeUntilReset(
+                        reference: displayEnvironment.now,
+                        timeZone: displayEnvironment.timeZone
+                    )
                 )
 
                 // Big number + "left"
@@ -54,27 +64,16 @@ struct NormalUsageView: View {
             Spacer().frame(height: 20)
 
             // Weekly section
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: CBPopoverMetrics.lowerSectionSpacing) {
                 SectionHeader(
                     title: "THIS WEEK",
-                    subtitle: usage.sevenDay.resetDateShort
+                    subtitle: usage.sevenDay.resetDateShort(
+                        reference: displayEnvironment.now,
+                        timeZone: displayEnvironment.timeZone
+                    )
                 )
 
-                HStack(spacing: 10) {
-                    Text("\(usage.sevenDay.remainingInt)")
-                        .font(CBFont.weeklyNumber)
-                        .foregroundStyle(CBColor.textPrimary)
-                        .frame(width: 50, alignment: .leading)
-
-                    SegmentedBatteryBar(
-                        percentage: usage.sevenDay.remaining,
-                        size: .medium
-                    )
-
-                    // Balance the leading number column so the weekly bar and
-                    // the model-row bars share the same left edge
-                    Color.clear.frame(width: 50)
-                }
+                WeeklyUsageRow(period: usage.sevenDay)
             }
 
             // Model breakdown — one row per model-scoped weekly limit (Fable,
@@ -84,10 +83,10 @@ struct NormalUsageView: View {
             // exhausted tier).
             let modelBreakdown = usage.weeklyModelBreakdown
             if !modelBreakdown.isEmpty {
-                Spacer().frame(height: 16)
+                Spacer().frame(height: CBPopoverMetrics.lowerSectionSpacing)
 
-                VStack(spacing: 6) {
-                    ForEach(modelBreakdown, id: \.label) { entry in
+                VStack(spacing: CBPopoverMetrics.modelRowSpacing) {
+                    ForEach(modelBreakdown) { entry in
                         ModelBreakdownRow(
                             label: entry.label,
                             remaining: entry.period.remaining,

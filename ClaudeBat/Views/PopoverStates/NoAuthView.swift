@@ -9,9 +9,11 @@ struct NoAuthView: View {
 
     var mode: Mode = .setup
     var forceInstalled: Bool? = nil
+    @Environment(\.popoverDisplayEnvironment) private var displayEnvironment
 
     private var claudeCodeInstalled: Bool {
         if let forced = forceInstalled { return forced }
+        if let installed = displayEnvironment.claudeInstalled { return installed }
         return FileManager.default.fileExists(atPath: "/usr/local/bin/claude")
             || FileManager.default.fileExists(atPath: "/opt/homebrew/bin/claude")
             || executableOnPath(named: "claude")

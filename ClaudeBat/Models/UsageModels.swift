@@ -37,11 +37,12 @@ public struct UsageResponse: Codable {
     /// `seven_day_opus`/`seven_day_sonnet` buckets, which the API nulled out
     /// mid-2026 but older cached responses may still carry.
     public var weeklyModelBreakdown: [ModelWeeklyUsage] {
-        let scoped = (limits ?? []).compactMap { limit -> ModelWeeklyUsage? in
+        let scoped = (limits ?? []).enumerated().compactMap { offset, limit -> ModelWeeklyUsage? in
             guard limit.group == "weekly",
                   let name = limit.scope?.model?.displayName,
                   let percent = limit.percent else { return nil }
             return ModelWeeklyUsage(
+                id: limit.scope?.model?.id ?? "weekly-\(offset)-\(name)",
                 label: name,
                 period: UsagePeriod(utilization: percent, resetsAt: limit.resetsAt)
             )
@@ -50,10 +51,10 @@ public struct UsageResponse: Codable {
 
         var legacy: [ModelWeeklyUsage] = []
         if let opus = sevenDayOpus {
-            legacy.append(ModelWeeklyUsage(label: "Opus", period: opus))
+            legacy.append(ModelWeeklyUsage(id: "legacy-opus", label: "Opus", period: opus))
         }
         if let sonnet = sevenDaySonnet {
-            legacy.append(ModelWeeklyUsage(label: "Sonnet", period: sonnet))
+            legacy.append(ModelWeeklyUsage(id: "legacy-sonnet", label: "Sonnet", period: sonnet))
         }
         return legacy
     }
@@ -116,11 +117,13 @@ public struct UsageLimitScopeModel: Codable {
 }
 
 /// A labeled per-model weekly usage row, ready for display.
-public struct ModelWeeklyUsage: Equatable {
+public struct ModelWeeklyUsage: Identifiable, Equatable {
+    public let id: String
     public let label: String
     public let period: UsagePeriod
 
-    public init(label: String, period: UsagePeriod) {
+    public init(id: String, label: String, period: UsagePeriod) {
+        self.id = id
         self.label = label
         self.period = period
     }
@@ -161,8 +164,11 @@ public struct UsagePeriod: Codable, Equatable {
 
     /// Human-readable time until reset
     public var timeUntilReset: String {
+        timeUntilReset(reference: Date(), timeZone: .current)
+    }
+
+    public func timeUntilReset(reference now: Date, timeZone: TimeZone) -> String {
         guard let date = resetsAtDate else { return "" }
-        let now = Date()
         let interval = date.timeIntervalSince(now)
         guard interval > 0 else { return "Recently reset" }
 
@@ -170,7 +176,7 @@ public struct UsagePeriod: Codable, Equatable {
         let minutes = (Int(interval) % 3600) / 60
 
         if hours > 24 {
-            return "Resets \(Self.formatResetTimestamp(date, reference: now))"
+            return "Resets \(Self.formatResetTimestamp(date, reference: now, timeZone: timeZone))"
         } else if hours > 0 {
             return "Resets in \(hours)h \(minutes)m"
         } else {
@@ -180,8 +186,12 @@ public struct UsagePeriod: Codable, Equatable {
 
     /// Short format for weekly display
     public var resetDateShort: String {
+        resetDateShort(reference: Date(), timeZone: .current)
+    }
+
+    public func resetDateShort(reference: Date, timeZone: TimeZone) -> String {
         guard let date = resetsAtDate else { return "" }
-        return "Resets \(Self.formatResetTimestamp(date))"
+        return "Resets \(Self.formatResetTimestamp(date, reference: reference, timeZone: timeZone))"
     }
 
     // MARK: - Reset time formatting (single source of truth)
@@ -190,24 +200,42 @@ public struct UsagePeriod: Codable, Equatable {
     // surface and never garble in non-US locales — the retro look is intentionally
     // en-US. All three render sites (SESSION, THIS WEEK, GAME OVER) go through
     // `formatResetTimestamp`, killing the old "2PM" vs "2:30 PM" drift.
-    private static let datedResetFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "MMM d, h:mm a"
-        return f
-    }()
+    private static let currentDatedResetFormatter = makeResetFormatter(
+        dated: true,
+        timeZone: .current
+    )
 
-    private static let timeResetFormatter: DateFormatter = {
+    private static let currentTimeResetFormatter = makeResetFormatter(
+        dated: false,
+        timeZone: .current
+    )
+
+    private static func makeResetFormatter(dated: Bool, timeZone: TimeZone) -> DateFormatter {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "h:mm a"
+        f.timeZone = timeZone
+        f.dateFormat = dated ? "MMM d, h:mm a" : "h:mm a"
         return f
-    }()
+    }
+
+    private static func resetFormatter(dated: Bool, timeZone: TimeZone) -> DateFormatter {
+        if timeZone == TimeZone.current {
+            return dated ? currentDatedResetFormatter : currentTimeResetFormatter
+        }
+        return makeResetFormatter(dated: dated, timeZone: timeZone)
+    }
 
     /// Renders an absolute reset time consistently: a dated form for far-off
     /// (weekly) resets, time-only for same-day (session) resets.
-    public static func formatResetTimestamp(_ date: Date, reference: Date = Date()) -> String {
-        let formatter = date.timeIntervalSince(reference) > 24 * 3600 ? datedResetFormatter : timeResetFormatter
+    public static func formatResetTimestamp(
+        _ date: Date,
+        reference: Date = Date(),
+        timeZone: TimeZone = .current
+    ) -> String {
+        let formatter = resetFormatter(
+            dated: date.timeIntervalSince(reference) > 24 * 3600,
+            timeZone: timeZone
+        )
         return formatter.string(from: date)
     }
 }

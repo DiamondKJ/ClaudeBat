@@ -3,6 +3,7 @@ import SwiftUI
 struct LoadingRetroView: View {
     let title: String
     let message: String?
+    @Environment(\.popoverDisplayEnvironment) private var displayEnvironment
 
     private let totalSegments = 20
     private let expressions: [BatExpression] = [.default, .winking, .cheeky, .sleeping]
@@ -13,9 +14,20 @@ struct LoadingRetroView: View {
     }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.08)) { context in
-            let filledSegments = filledSegmentCount(at: context.date)
-            VStack(spacing: 0) {
+        Group {
+            if let fixedNow = displayEnvironment.fixedNow {
+                content(at: fixedNow)
+            } else {
+                TimelineView(.periodic(from: .now, by: 0.08)) { context in
+                    content(at: context.date)
+                }
+            }
+        }
+    }
+
+    private func content(at date: Date) -> some View {
+        let filledSegments = filledSegmentCount(at: date)
+        return VStack(spacing: 0) {
                 Spacer()
 
                 Text(title)
@@ -57,7 +69,7 @@ struct LoadingRetroView: View {
                 Spacer().frame(height: 32)
 
                 PixelBatView(
-                    expression: expression(at: context.date),
+                    expression: expression(at: date),
                     pixelSize: 4,
                     color: CBColor.accent
                 )
@@ -67,7 +79,6 @@ struct LoadingRetroView: View {
             .padding(.horizontal, CBSpacing.popupPadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(CBColor.base)
-        }
     }
 
     private func filledSegmentCount(at date: Date) -> Int {

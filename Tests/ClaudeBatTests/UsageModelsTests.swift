@@ -145,4 +145,31 @@ struct UsageModelsTests {
     @Test func weeklyModelBreakdown_emptyWhenNoModelData() {
         #expect(UsageResponse.fixture().weeklyModelBreakdown.isEmpty)
     }
+
+    @Test func weeklyModelBreakdown_duplicateLabelsKeepStableModelIdentity() {
+        func response(_ models: [(id: String, label: String)]) -> UsageResponse {
+            UsageResponse(
+                fiveHour: UsagePeriod(utilization: 10, resetsAt: nil),
+                sevenDay: UsagePeriod(utilization: 20, resetsAt: nil),
+                limits: models.map { model in
+                    UsageLimit(
+                        group: "weekly",
+                        percent: 50,
+                        scope: UsageLimitScope(
+                            model: UsageLimitScopeModel(id: model.id, displayName: model.label)
+                        )
+                    )
+                }
+            )
+        }
+
+        let first = response([("model-a", "Fable"), ("model-b", "Fable")])
+            .weeklyModelBreakdown
+        let reordered = response([("model-b", "Fable"), ("model-a", "Fable")])
+            .weeklyModelBreakdown
+
+        #expect(first.map(\.id) == ["model-a", "model-b"])
+        #expect(reordered.map(\.id) == ["model-b", "model-a"])
+        #expect(Set(first.map(\.id)).count == 2)
+    }
 }

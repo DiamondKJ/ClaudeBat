@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-14",
+  "commit_base": "78c7b4e",
+  "branch": "codex/popover-sizing-fix",
+  "environment": {
+    "xcode": "26.6 (17F113)",
+    "swift": "6.3.3",
+    "macos": "26.5.1 (25F80)",
+    "architecture": "arm64",
+    "backing_scale": 2.0
+  },
+  "command": "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer CB_RUN_APPKIT_LAYOUT_TESTS=1 swift test --filter PopoverRootCharacterizationTests",
+  "host_setup": {
+    "sizing_options": ["preferredContentSize"],
+    "initial_allocations": [392, 472, 1000, 10000],
+    "size_that_fits_proposals": [392, 472, 1000, 10000],
+    "width": 320,
+    "normalization_points": 0.5,
+    "font": "PressStart2P-Regular.ttf"
+  },
+  "measurements": {
+    "normal_compact_preferred_heights": [327, 327, 327, 327],
+    "retained_normal_round_trip": [327, 471, 327],
+    "canonical_error_preferred_heights": [392, 392, 392, 392],
+    "canonical_loading_preferred_heights": [392, 392, 392, 392],
+    "canonical_game_over_preferred_heights": [392, 392, 392, 392]
+  },
+  "matrix_results": {
+    "preferred_and_size_that_fits_agree_within_one_point": true,
+    "compact_expanded_compact_round_trip_within_one_point": true,
+    "heavy_normal_is_taller_than_expanded": true,
+    "all_cached_banner_reasons_grow_and_round_trip": true,
+    "long_error_is_at_least_392": true,
+    "no_auth_installed_and_not_installed_are_at_least_392": true,
+    "recovery_message_is_at_least_392": true,
+    "game_over_extra_usage_and_banner_variants_are_at_least_392": true,
+    "all_measured_sizes_are_finite_and_width_320": true
+  },
+  "result": "pass_local_exact_unwired_primitives",
+  "remaining_release_evidence": [
+    "post-cutover rerun against UsagePopoverView",
+    "macOS 14 and macOS 15 GUI runners",
+    "physical 1x display",
+    "Intel oldest-supported runtime while universal release remains supported"
+  ]
+}

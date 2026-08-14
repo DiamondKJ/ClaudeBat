@@ -17,23 +17,15 @@ struct ClaudeBatApp: App {
 // MARK: - App Delegate
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
-    private enum PopoverLayout {
-        static let width: CGFloat = 320
-        static let baseHeight: CGFloat = 392
-        static let bannerHeight: CGFloat = 472
-    }
-
+final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
+    private var usageHost: NSHostingController<UsagePopoverView>!
+    private var popoverSizeCoordinator: PopoverSizeCoordinator!
+    private var popoverPresentationDriver: PopoverPresentationDriver!
     private var contextPopover: NSPopover!
     private let viewModel = UsageViewModel()
     private var eventMonitor: Any?
-    // Last height SwiftUI reported for the popover content. Reused when
-    // reopening: the view stays attached across open/close, so its measurement
-    // callbacks don't re-fire on a re-show — resetting to the layout constants
-    // here would reintroduce the fixed-height dead space.
-    private var lastReportedPopoverHeight: CGFloat?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         FontRegistration.registerFonts()
@@ -51,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        popoverPresentationDriver?.shutdown()
         viewModel.shutdown()
         viewModel.recordAppTermination()
     }
@@ -88,7 +81,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     private func setupPopover() {
         popover = NSPopover()
-        popover.contentSize = NSSize(width: PopoverLayout.width, height: PopoverLayout.baseHeight)
         // .applicationDefined (not .transient): we own every open/close so the status
         // button can toggle reliably. .transient auto-closes on the mouse-DOWN before our
         // mouse-UP action runs, which made isShown stale and caused close→reopen flicker
@@ -97,30 +89,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // No fade: instant toggle matches the native menu bar feel and removes the
         // animation races that left a phantom popover when clicking rapidly.
         popover.animates = false
-        popover.delegate = self
-        popover.contentViewController = NSHostingController(
+        popover.appearance = NSAppearance(named: .darkAqua)
+
+        usageHost = NSHostingController(
             rootView: UsagePopoverView(
                 viewModel: viewModel,
-                onPreferredHeightChange: { [weak self] height in
-                    self?.lastReportedPopoverHeight = height
-                    self?.updatePopoverSize(height: height)
+                onCloseRequested: { [weak self] in
+                    self?.requestUsagePopoverClose()
+                },
+                onContentInvalidated: { [weak self] in
+                    self?.usagePopoverContentInvalidated()
                 }
             )
         )
-        popover.appearance = NSAppearance(named: .darkAqua)
-    }
+        // Native preferred-size tracking can resize an attached NSPopover behind
+        // the coordinator. Keep it disabled and use one finite fitting query.
+        usageHost.sizingOptions = []
 
-    private func updatePopoverSize(height: CGFloat) {
-        // No-op on sub-point differences, and never mutate the popover
-        // synchronously from inside SwiftUI's update pass (the height callback
-        // fires there): contentSize -> setFrame -> layout -> re-measure
-        // re-enters SwiftUI and can spin the main thread forever.
-        guard abs(popover.contentSize.height - height) > 0.5 else { return }
-        let targetSize = NSSize(width: PopoverLayout.width, height: height)
-        DispatchQueue.main.async { [weak self] in
-            self?.popover.contentSize = targetSize
-            self?.popover.contentViewController?.preferredContentSize = targetSize
-        }
+        popoverSizeCoordinator = PopoverSizeCoordinator(
+            width: CBPopoverMetrics.width,
+            measure: { [weak host = usageHost] in
+                guard let host else { return nil }
+                host.view.layoutSubtreeIfNeeded()
+                return host.sizeThatFits(
+                    in: CGSize(
+                        width: CBPopoverMetrics.width,
+                        height: CBPopoverMetrics.measurementHeightProposal
+                    )
+                )
+            },
+            readCurrentSize: { [weak popover] in
+                popover?.contentSize
+            },
+            applySize: { [weak popover] size in
+                guard let popover else { return false }
+                popover.contentSize = size
+                return popover.contentSize == size
+            }
+        )
+
+        popoverPresentationDriver = PopoverPresentationDriver(
+            popover: popover,
+            coordinator: popoverSizeCoordinator,
+            onPresentationOpen: { [weak viewModel] in
+                viewModel?.onPopoverOpen()
+            },
+            onPresentationClose: { [weak viewModel] in
+                viewModel?.onPopoverClose()
+            }
+        )
+
+        // Assign last so an early SwiftUI callback can only observe a fully
+        // initialized host/coordinator pair.
+        popover.contentViewController = usageHost
     }
 
     // MARK: - Context Menu Popover
@@ -187,31 +208,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         } else {
             // Toggle: a second click on the button closes the popover instead of reopening it.
             if popover.isShown {
-                popover.performClose(nil)
+                requestUsagePopoverClose()
             } else {
                 closeAllPopovers()
-                let fallback = viewModel.shouldShowCachedBanner ? PopoverLayout.bannerHeight : PopoverLayout.baseHeight
-                updatePopoverSize(height: lastReportedPopoverHeight ?? fallback)
-                popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+                openUsagePopover(relativeTo: sender)
             }
         }
     }
 
+    private func openUsagePopover(relativeTo sender: NSStatusBarButton) {
+        popoverPresentationDriver.open(
+            relativeTo: sender.bounds,
+            of: sender,
+            preferredEdge: .minY
+        )
+    }
+
+    private func usagePopoverContentInvalidated() {
+        popoverPresentationDriver?.contentMayHaveChanged()
+    }
+
+    private func requestUsagePopoverClose() {
+        popoverPresentationDriver?.requestClose()
+    }
+
     private func closeAllPopovers() {
-        if popover.isShown { popover.performClose(nil) }
+        if popover.isShown { requestUsagePopoverClose() }
         if contextPopover.isShown { contextPopover.performClose(nil) }
-    }
-
-    // MARK: - NSPopoverDelegate
-
-    func popoverWillShow(_ notification: Notification) {
-        guard notification.object as? NSPopover === popover else { return }
-        viewModel.onPopoverOpen()
-    }
-
-    func popoverDidClose(_ notification: Notification) {
-        guard notification.object as? NSPopover === popover else { return }
-        viewModel.onPopoverClose()
     }
 
     /// On first launch, opt into Launch at Login by default — a menu-bar app is
