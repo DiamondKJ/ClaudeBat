@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-14",
+  "environment": {
+    "macos": "26.5.1 (25F80)",
+    "architecture": "arm64",
+    "backing_scale": 2.0,
+    "window_server": true
+  },
+  "rejected_candidate": {
+    "name": "background GeometryReader plus PreferenceKey",
+    "result": "fail",
+    "initial_callbacks": 0,
+    "changed_size_callbacks": 0
+  },
+  "selected_candidate": {
+    "name": "onGeometryChange for CGSize on the final root",
+    "native_preferred_size_tracking": false,
+    "normal_shape_cycles": 100,
+    "additional_size_changes": 12,
+    "expected_callbacks": 112,
+    "observed_callbacks": 112,
+    "missed_changes": 0,
+    "extra_callbacks": 0,
+    "stable_window_callback_delta": 0,
+    "shown_popover": true,
+    "result": "pass_local"
+  },
+  "command": "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer CB_RUN_APPKIT_POPOVER_TESTS=1 swift test --filter PopoverSignalCharacterizationTests",
+  "remaining_release_matrix": [
+    "macOS 14 Apple Silicon GUI",
+    "macOS 15 Apple Silicon GUI",
+    "physical 1x display",
+    "Intel oldest-supported runtime while universal release remains supported"
+  ]
+}

@@ -4,10 +4,17 @@ struct GameOverView: View {
     let usage: UsageResponse
 
     @Environment(\.openURL) private var openURL
+    @Environment(\.popoverDisplayEnvironment) private var displayEnvironment
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.8)) { context in
-            content(blinkVisible: blinkVisible(at: context.date))
+        Group {
+            if let fixedNow = displayEnvironment.fixedNow {
+                content(blinkVisible: blinkVisible(at: fixedNow))
+            } else {
+                TimelineView(.periodic(from: .now, by: 0.8)) { context in
+                    content(blinkVisible: blinkVisible(at: context.date))
+                }
+            }
         }
     }
 
@@ -81,7 +88,7 @@ struct GameOverView: View {
 
     private var countdownText: String {
         guard let date = blockingResetDate else { return "--:--" }
-        let interval = date.timeIntervalSince(Date())
+        let interval = date.timeIntervalSince(displayEnvironment.now)
         guard interval > 0 else { return "0:00" }
 
         let totalMinutes = Int(interval) / 60
@@ -96,7 +103,11 @@ struct GameOverView: View {
     private var resetTimeShort: String {
         guard let date = blockingResetDate else { return "--:--" }
         // Shared formatter: dated for far-off (weekly) resets, time-only for same-day.
-        return UsagePeriod.formatResetTimestamp(date).uppercased()
+        return UsagePeriod.formatResetTimestamp(
+            date,
+            reference: displayEnvironment.now,
+            timeZone: displayEnvironment.timeZone
+        ).uppercased()
     }
 
     private func blinkVisible(at date: Date) -> Bool {

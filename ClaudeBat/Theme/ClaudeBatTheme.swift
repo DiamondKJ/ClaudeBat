@@ -118,8 +118,8 @@ enum CBRadius {
 // MARK: - Font Registration
 
 public enum FontRegistration {
-    public static func registerFonts() {
-        guard let fontURL = findFontURL() else {
+    public static func registerFonts(searchingFrom additionalRoot: URL? = nil) {
+        guard let fontURL = findFontURL(additionalRoot: additionalRoot) else {
             print("ClaudeBat: PressStart2P-Regular.ttf not found in any bundle")
             return
         }
@@ -136,18 +136,36 @@ public enum FontRegistration {
 
     /// Find the font without relying on Bundle.module (which fatalErrors if the
     /// SPM resource bundle isn't found — common in redistributed .app bundles).
-    private static func findFontURL() -> URL? {
+    private static func findFontURL(additionalRoot: URL?) -> URL? {
         let fontName = "PressStart2P-Regular"
         let bundleName = "ClaudeBat_ClaudeBatCore"
 
         // 1. Search for the SPM resource bundle in likely locations
-        let searchRoots: [URL?] = [
+        var searchRoots: [URL] = [
             Bundle.main.resourceURL,                                          // .app/Contents/Resources/
             Bundle.main.bundleURL,                                            // .app/
             Bundle.main.executableURL?.deletingLastPathComponent(),            // next to binary (swift run)
-        ]
+        ].compactMap { $0 }
+
+        // XCTest executables live several levels below SwiftPM's resource
+        // bundle. Walking a few ancestors keeps layout tests on the real pixel
+        // font without introducing a test-only absolute build path.
+        if var ancestor = Bundle.main.executableURL?.deletingLastPathComponent() {
+            for _ in 0..<4 {
+                ancestor.deleteLastPathComponent()
+                searchRoots.append(ancestor)
+            }
+        }
+
+        if var ancestor = additionalRoot {
+            for _ in 0..<5 {
+                searchRoots.append(ancestor)
+                ancestor.deleteLastPathComponent()
+            }
+        }
+
         for root in searchRoots {
-            guard let bundleDir = root?.appendingPathComponent(bundleName + ".bundle") else { continue }
+            let bundleDir = root.appendingPathComponent(bundleName + ".bundle")
             // Release .app: Contents/Resources/Font.ttf
             let nested = bundleDir.appendingPathComponent("Contents/Resources/\(fontName).ttf")
             if FileManager.default.fileExists(atPath: nested.path) { return nested }

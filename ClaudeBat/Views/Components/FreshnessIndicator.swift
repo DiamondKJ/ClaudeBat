@@ -7,10 +7,17 @@ struct FreshnessIndicator: View {
     var freshness: UsageViewModel.Freshness = .empty
 
     @State private var dotOpacity: Double = 1.0
+    @Environment(\.popoverDisplayEnvironment) private var displayEnvironment
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1.0)) { _ in
-            content
+        Group {
+            if displayEnvironment.fixedNow != nil {
+                content
+            } else {
+                TimelineView(.periodic(from: .now, by: 1.0)) { _ in
+                    content
+                }
+            }
         }
     }
 
@@ -31,9 +38,10 @@ struct FreshnessIndicator: View {
                     .foregroundStyle(CBColor.textMuted)
             }
         } else if let fetchedAt {
+            let now = displayEnvironment.now
             HStack(spacing: 4) {
-                dotView(color: dotColor(for: fetchedAt))
-                Text(relativeTimestamp(from: fetchedAt))
+                dotView(color: dotColor(for: fetchedAt, now: now))
+                Text(relativeTimestamp(from: fetchedAt, now: now))
                     .font(CBFont.smallLabel)
                     .foregroundStyle(CBColor.textMuted)
             }
@@ -46,8 +54,8 @@ struct FreshnessIndicator: View {
             .frame(width: 6, height: 6)
     }
 
-    private func relativeTimestamp(from date: Date) -> String {
-        let seconds = Int(Date().timeIntervalSince(date))
+    private func relativeTimestamp(from date: Date, now: Date) -> String {
+        let seconds = Int(now.timeIntervalSince(date))
         if seconds < 1 { return "Just now" }
         if seconds < 60 { return "\(seconds)s" }
         let m = seconds / 60
@@ -57,8 +65,8 @@ struct FreshnessIndicator: View {
         return "\(h)h \(m % 60)m"
     }
 
-    private func dotColor(for date: Date) -> Color {
-        let age = Date().timeIntervalSince(date)
+    private func dotColor(for date: Date, now: Date) -> Color {
+        let age = now.timeIntervalSince(date)
         if age < 120 { return CBColor.textMuted }
         if age < 600 { return CBColor.batteryMid }
         return CBColor.batteryLow
